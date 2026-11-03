@@ -725,6 +725,7 @@ Mỗi khi hoàn thành một bộ phim mới, luôn chạy qua 10 bước kiểm
 8. **[ ] Soát bảng ảnh QA (`qa_sheet.py`):** Mở xem trực tiếp tất cả các ảnh `work/qa/qa_*.jpg` để chắc chắn **100% khung hình khớp với nội dung câu chuyện đang kể** (không dính thẻ tên nhân vật, không nhầm cảnh hồi tưởng, không dính chữ "未完待续").
 9. **[ ] Xuất kèm file `.srt` và `.txt` sạch sẽ:** Khi xuất `output/review_vi.srt` từ `work/subs_vi.ass`, đảm bảo đã thay ký tự xuống dòng `\N` của ASS thành `\n` chuẩn SRT.
 10. **[ ] Kiểm tra thông số file `output/review_vi.mp4`:** Có đủ luồng H.264 + AAC 48kHz, âm lượng chuẩn hóa khoảng `-15 LUFS`, hình và tiếng đồng bộ từ giây đầu đến giây cuối.
+11. **[ ] Dọn sạch toàn bộ dữ liệu tạm sau khi hoàn thành:** Sau khi đã kiểm tra xong thành phẩm trong `output/`, xóa sạch `work/`, `pipeline/__pycache__/` và file `.mp4` + `.srt` trong `input/` (chỉ giữ lại `output/` cùng bộ code Core và thư mục `input/` trống để sẵn sàng cho tập tiếp theo).
 
 ### 14.2. Prompt mẫu (Master Prompt) để giao việc cho AI ở các bộ phim tiếp theo
 

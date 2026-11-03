@@ -41,16 +41,17 @@ PAUSE = 0.14          # silence between beats (s)
 SEG_TARGET = 2.9      # preferred visual segment length (s)
 ORIG_VOL = 0.0        # original soundtrack muted (0.0 = pure Vietnamese narration)
 BURN_SUBS = False     # do not burn Vietnamese subtitles or title onto the video
+BLUR_SUBS = False     # do not blur Chinese hard-subs when False
 W, H = 1080, 1920
 ZOOM = 1.05
 BAND_Y, BAND_H = 1215, 430
-HAS_HARDSUB = True
+HAS_HARDSUB = BLUR_SUBS
 META_P = os.path.join(WORK, "video_meta.json")
 if os.path.exists(META_P):
     _meta = json.load(open(META_P))
     W, H = _meta.get("W", W), _meta.get("H", H)
     BAND_Y, BAND_H = _meta.get("band_y", BAND_Y), _meta.get("band_h", BAND_H)
-    HAS_HARDSUB = _meta.get("has_hardsub", True)
+    HAS_HARDSUB = _meta.get("has_hardsub", True) and BLUR_SUBS
 IS_LANDSCAPE = W >= H
 MASK_2D = os.path.join(WORK, "band_mask_2d.png")
 MASK_1D = os.path.join(WORK, "band_mask_1d.png")
@@ -131,8 +132,21 @@ def load_exclusions():
     subs = json.load(open(os.path.join(WORK, "srt_condensed.json"), encoding="utf-8"))
     ex = []
     for st, en, tx in subs:
-        if "待续" in tx or "剧终" in tx or ("待" in tx and "续" in tx):
-            ex.append((st - 1.6, en + 1.2))
+        if any(k in tx for k in ("待续", "法续", "佳续", "未完", "剧终", "完结")):
+            ex.append((st - 2.0, en + 1.5))
+    if os.path.exists(SRT_PATH):
+        raw = open(SRT_PATH, encoding="utf-8", errors="ignore").read()
+        for blk in re.split(r"\n\s*\n", raw.strip()):
+            ls = [x.strip() for x in blk.splitlines() if x.strip()]
+            if len(ls) >= 2:
+                m = re.match(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)", ls[1] if ls[0].isdigit() else ls[0])
+                if m:
+                    g = [int(x) for x in m.groups()]
+                    t0 = g[0]*3600 + g[1]*60 + g[2] + g[3]/1000.0
+                    t1 = g[4]*3600 + g[5]*60 + g[6] + g[7]/1000.0
+                    txt = "".join(ls[2:] if ls[0].isdigit() else ls[1:])
+                    if any(k in txt for k in ("待续", "法续", "佳续", "未完", "剧终", "完结")) or (len(txt) <= 4 and "续" in txt):
+                        ex.append((t0 - 2.2, t1 + 1.5))
     return ex
 
 
