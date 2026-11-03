@@ -63,42 +63,46 @@ flowchart TD
 
 ```
 review_tool/
-├── 1.mp4                     # Phim gốc
-├── 1.srt                     # Phụ đề Trung gốc (OCR, có lỗi + thiếu đoạn)
+├── input/                    # 📥 Bỏ 1 file .mp4 và 1 file .srt của tập mới vào đây
+│   ├── 1.mp4                 # Phim gốc (hoặc bất kỳ tên *.mp4 nào trong input/)
+│   └── 1.srt                 # Phụ đề Trung gốc (hoặc bất kỳ tên *.srt nào trong input/)
 ├── README.md                 # Tài liệu này
 ├── tools/
 │   └── ffmpeg.exe            # ffmpeg 9 (từ imageio-ffmpeg) có libass + NVENC
-├── pipeline/                 # Toàn bộ code
+├── pipeline/                 # Toàn bộ code Core
 │   ├── condense_srt.py       # B2: rút gọn SRT thành khối thoại có mốc thời gian
 │   ├── asr.py                # B3: Whisper large-v3 nhận dạng thoại toàn phim
 │   ├── shots.py              # B4: tách cú máy (shot boundary)
 │   ├── detect_subband.py     # B5a: thống kê vị trí phụ đề Trung in cứng
 │   ├── contact_sheets.py     # B5b: ảnh lưới 6 giây/khung để AI "xem phim"
-│   ├── script_beats.py       # B6: KỊCH BẢN tiếng Việt (112 beat + cửa sổ thời gian)
+│   ├── script_beats.py       # B6: KỊCH BẢN tiếng Việt (chia theo beat + cửa sổ thời gian)
 │   ├── overlay_text.py       # B8: đánh dấu cú máy có chữ overlay (tên nhân vật, "未完待续")
 │   ├── assemble.py           # B9: dựng video (audio / plan / beats / final)
 │   ├── qa_tts.py             # B10: chuyển giọng đọc ngược thành chữ để soát lỗi phát âm
-│   └── qa_sheet.py           # B10: ảnh lưới 1 khung/beat từ video thành phẩm
-├── work/                     # File trung gian (có thể xóa để làm lại từ đầu)
+│   ├── qa_sheet.py           # B10: ảnh lưới 1 khung/beat từ video thành phẩm
+│   └── make_thumbnails.py    # B11: thiết kế 3 mẫu Thumbnail YouTube/Shorts chuẩn UTF-8
+├── work/                     # File trung gian (tự tạo khi chạy, có thể xóa sau khi xong)
 │   ├── srt_condensed.txt/.json
 │   ├── asr.json, asr_gaps.txt
-│   ├── shots.json, shot_flags.json, subbands.json
-│   ├── sheets/               # 21 ảnh lưới tổng quan phim gốc
+│   ├── shots.json, shot_flags.json, subbands.json, video_meta.json
+│   ├── sheets/               # Ảnh lưới tổng quan phim gốc
 │   ├── tts/narration.srt     # File nạp vào app TTS
-│   ├── tts/narration/        # 1.mp3 … 112.mp3 do app TTS sinh ra
-│   ├── aud/                  # 001.wav … 112.wav (đã cắt khoảng lặng)
-│   ├── beats/                # 001.mp4 … 112.mp4 (video từng beat) + .sig (cache)
-│   ├── band_mask.png         # Mặt nạ viền mềm cho dải làm mờ
-│   ├── plan.json             # Kế hoạch cắt hình cho từng beat
+│   ├── tts/narration/        # 1.mp3 … N.mp3 do app TTS sinh ra
+│   ├── aud/                  # 001.wav … N.wav (đã cắt khoảng lặng)
+│   ├── beats/                # 001.mp4 … N.mp4 (video từng beat) + .sig (cache)
+│   ├── band_mask_2d.png      # Mặt nạ 2D viền mềm che vừa khít từng câu sub Trung
+│   ├── plan.json             # Kế hoạch cắt hình & tọa độ hộp che sub cho từng beat
 │   ├── beats_audio.json
-│   ├── joined.mp4            # Ghép các beat (chưa phụ đề)
+│   ├── joined.mp4            # Ghép các beat
 │   ├── narration_full.wav    # Toàn bộ giọng đọc đã căn thời gian
 │   ├── subs_vi.ass           # Phụ đề Việt định dạng ASS
 │   └── qa/                   # Ảnh QA
-└── output/
+└── output/                   # 📤 Tự tạo khi xuất thành phẩm
     ├── review_vi.mp4         # ⭐ VIDEO THÀNH PHẨM
     ├── review_vi.srt         # Phụ đề Việt dạng SRT
-    └── kich_ban_review.txt   # Kịch bản kèm mốc thời gian nguồn
+    ├── kich_ban_review.txt   # Kịch bản kèm số thứ tự beat
+    ├── youtube_seo.txt       # Bộ Tiêu đề, Mô tả, Chapters, Tags chuẩn SEO YouTube
+    └── thumbnail_*.jpg       # Bộ 3 Thumbnail (2 ngang 16:9 + 1 dọc 9:16)
 ```
 
 ---
@@ -458,21 +462,18 @@ scale 1134x2016 (phóng 1,05x) → crop 1080x1920 chính giữa → fps 29.97 �
 ```
 
 - **Phóng 1,05×**: lấp đầy khung 1080 (gốc 1078) và làm khung hình khác bản gốc một chút.
-- **Làm mờ phụ đề Trung**: cắt dải `y = 1215 → 1645` (cao 430 px, đã tính sau khi phóng) → `boxblur` bán kính 42 → giảm sáng 10%, giảm bão hòa → ghép lại bằng **mặt nạ viền mềm** `band_mask.png` (42 px chuyển dần ở mép trên/dưới) để không lộ đường kẻ cứng.
+- **Làm mờ phụ đề Trung vừa khít 2 chiều (`detect_all_seg_boxes`):** Với mỗi đoạn cắt `(a, b)`, thuật toán quét đa luồng tìm chính xác tọa độ hộp chữ tiếng Trung `[x, y, w, h]` xuất hiện trong đoạn đó (cao chỉ ~120–135 px thay vì 430 px, rộng vừa khít câu chữ, các cảnh không có thoại thì giữ nguyên không làm mờ) → dùng `boxblur` (không làm tối nền) ghép qua mặt nạ viền mềm 4 cạnh `band_mask_2d.png` (hoặc `band_mask_1d.png` khi câu thoại dài sát mép màn hình).
 - Khóa đúng số khung hình (`-frames:v`) và dùng `tpad` để không bao giờ thiếu khung → toàn video không lệch tiếng/hình.
 
-### 7.2. Phụ đề tiếng Việt (ASS, in sẵn)
+### 7.2. Phụ đề tiếng Việt (Tùy chọn `BURN_SUBS`)
 
-- Chia lời mỗi beat thành các cụm ≤ 58 ký tự theo dấu câu, ngắt thành tối đa 2 dòng (~30 ký tự/dòng, chia cân 2 dòng).
-- Thời gian mỗi cụm = thời lượng giọng đọc của beat × (số âm tiết của cụm + 0,6 × số dấu câu) / tổng.
-- Kiểu chữ: **Roboto Bold 64**, chữ trắng, viền đen 5 px, bóng 2 px, đặt **chính giữa dải đã làm mờ** (`\an5\pos(540,1430)`).
-- **Tiêu đề** "BẠN THÂN MƯỢN CHỒNG SẮP CƯỚI": Roboto Bold 58, chữ vàng trên nền hộp đen, hiện ở trên cùng suốt phần mở màn (5 beat đầu), có hiệu ứng mờ dần vào/ra.
+- Mặc định **`BURN_SUBS = False`** (không in đè phụ đề tiếng Việt và không chèn tiêu đề lên video để giữ khung hình sạch tuyệt đối, phục vụ hậu kỳ/đăng tải linh hoạt; file phụ đề rời vẫn được xuất ra `output/review_vi.srt` và `work/subs_vi.ass`).
+- Nếu muốn in cứng phụ đề tiếng Việt lên hình, chỉ cần đổi `BURN_SUBS = True` trong `assemble.py` rồi chạy `python pipeline\assemble.py final` (chỉ mất ~1 phút).
 
 ### 7.3. Âm thanh
 
 - **Giọng đọc**: ghép các wav theo đúng từng mẫu âm thanh (Python thuần, không qua ffmpeg) – mỗi beat được đệm/cắt khớp chính xác thời lượng beat → không cộng dồn sai số.
-- **Âm gốc của phim**: giữ ở **13%** làm nền (tiếng nhạc phim, tiếng động), làm chậm cùng hình nếu có.
-- Trộn cuối: giọng đọc qua `acompressor` (ngưỡng −18 dB, tỉ lệ 3) → `amix` với âm gốc → `loudnorm` (I = −15 LUFS, TP = −1,5 dB) → fade out 1,2 giây ở cuối. Đo thực tế: âm lượng trung bình −17,8 dB, đỉnh −1,5 dB.
+- **Âm gốc của phim**: mặc định **`ORIG_VOL = 0.0`** (tắt hoàn toàn tiếng gốc của video, chỉ giữ 100% giọng đọc lồng tiếng Việt qua `acompressor` + `loudnorm` I = −15 LUFS, TP = −1,5 dB).
 - Mã hóa: H.264 NVENC (cq 20, tối đa 16 Mbps), AAC 192 kbps, `+faststart` để phát online nhanh.
 
 ---
@@ -619,6 +620,17 @@ Khi viết lại kịch bản hoặc sửa nhiều câu rồi chạy lại MCP `
 Khi một cảnh hồi tưởng ngắn (ví dụ 5 giây cảnh rơi xuống nước ở `1:49-1:55`) đã được dùng ở một beat trước (ví dụ Beat 78), danh sách `used` sẽ đánh dấu cảnh đó đã qua sử dụng. Nếu ở cuối phim (Beat 107) lại tiếp tục trỏ vào `1:49-1:55,63:09-63:19`, thuật toán ưu tiên cảnh chưa dùng (`freshc`) sẽ né đoạn hồi tưởng và lấy nhầm cảnh đứng bấm điện thoại ngay sát đó (`1:52-1:55`).
 - **Giải pháp:** Ở lần nhắc lại thứ hai, chỉ định cửa sổ thời gian hẹp đúng vào đoạn hồi tưởng xuất hiện ở cuối phim (ví dụ `63:09-63:19` – cảnh gọt táo trong bệnh viện) thay vì gộp chung cửa sổ đã dùng ở đầu phim.
 
+### 12.10. Phim siêu dài (4–5 tiếng) khiến Whisper và tách cú máy chạy quá lâu nếu quét tuần tự
+Ở Tập 2 (`2.mp4` dài **4 giờ 40 phút 55 giây**, `9.511` cú máy), nếu chạy Whisper toàn phim và `scenedetect` 1 luồng như Tập 1 (65 phút) sẽ mất hơn 60 phút.
+- **Giải pháp đã tích hợp sẵn vào Core:**
+  - `pipeline/asr.py`: Tự động dò các khoảng trống trong `.srt` lớn hơn `40 giây`, cắt riêng đoạn âm thanh bị khuyết bằng `ffmpeg` rồi mới chạy Whisper (giảm thời gian từ 25 phút xuống còn **~3,3 phút**).
+  - `pipeline/shots.py`: Chia video thành 8 khúc chạy song song bằng `ProcessPoolExecutor(8)` (giảm thời gian tách `9.511` cảnh từ 30 phút xuống còn **~5,9 phút**).
+  - `pipeline/contact_sheets.py`: Tự động giãn bước chụp (`step = max(6, dur // 1280)`) để luôn gói gọn trong ~22 tấm ảnh tổng quan bất kể phim dài 1 tiếng hay 5 tiếng.
+
+### 12.11. Phụ đề Trung nét mảnh hoặc nền áo trắng làm sót hộp làm mờ 2D
+Ở Tập 2, font chữ Trung mảnh hơn Tập 1 và nhiều cảnh nhân vật mặc vest trắng/kem trùng màu chữ nên bộ dò viền sáng–tối đơn thuần có thể bỏ sót một số câu thoại ngắn.
+- **Giải pháp đã tích hợp sẵn vào `pipeline/assemble.py` (`detect_all_seg_boxes`):** Hạ ngưỡng nhận diện nét chữ (`white > 195`, `dark < 95`, `prof > 5`), quét 9 khung mẫu mỗi đoạn cắt, và **kết hợp đối chiếu mốc thời gian của file `.srt` gốc** cùng nội suy tọa độ dọc (`interp_y`) từ các đoạn lân cận. Nhờ đó 100% câu thoại đều được che mờ chuẩn xác mà chiều cao hộp mờ vẫn gọn (`~110 px`).
+
 ---
 
 ## 13. Cẩm nang tuỳ biến cho mọi thể loại phim (Playbook)
@@ -661,14 +673,34 @@ Khi áp dụng công cụ này cho các bộ phim thuộc thể loại khác nha
   - **Cắt tỉa nhân vật phụ:** Phim cổ trang thường có 15–20 nhân vật; khi viết review 20 phút, chỉ giữ tên riêng cho **tối đa 5–6 nhân vật cốt lõi**, các nhân vật còn lại gọi bằng danh từ chung (*vị thái y, gã cận vệ, vị trưởng lão áo đen, ả thị tỳ*) để người nghe không bị loạn tên.
 - **Tham số đề xuất:** `speed = 1.06–1.08`, dùng từ ngữ trang trọng, giàu màu sắc cổ phong (*nơi thâm cung hiểm ác, mối huyết thù năm xưa, phế bỏ tu vi, một bước lên mây*).
 
-### 13.6. Xử lý phim Điện ảnh / Phim Lẻ Khung ngang (16:9, 90–150 phút)
-Khi đầu vào là một bộ phim điện ảnh khung ngang (`1920×1080`):
-1. **Giữ nguyên khung ngang 16:9 (dành cho YouTube dài):**
-   - Trong `assemble.py`, đặt `W, H = 1920, 1080`.
-   - Chạy `detect_subband.py` để lấy lại `BAND_Y, BAND_H` (thường ở khoảng `y = 880, h = 150` với khung 1080p ngang).
-   - Cỡ chữ phụ đề ASS giảm xuống `Fontsize = 46`, `maxline = 48` ký tự/dòng.
-2. **Hoặc chuyển từ khung ngang 16:9 sang khung dọc 9:16 (dành cho TikTok / Reels / Shorts):**
-   - Giữ `W, H = 1080, 1920`, đặt phim ngang vào chính giữa màn hình dọc với nền mờ phía trên/dưới, hoặc crop trung tâm kết hợp tiêu đề cố định ở phần trên và phụ đề ở phần dưới.
+### 13.6. Đặc trị Phim Trung Quốc: Xuyên Không / Trọng Sinh / Hệ Thống / Đọc Tâm (Transmigration / Rebirth / System)
+Đây là dòng phim chủ lực của phim ngắn & web-drama Trung Quốc, có 4 đặc thù cần xử lý đúng cách để người xem không bị rối:
+
+1. **Neo rõ "Hai Kiếp / Hai Thế Giới" ngay trong 3 Beat đầu tiên:**
+   - Phim trọng sinh (sống lại) hoặc xuyên sách (xuyên vào tiểu thuyết) thường mở màn bằng cảnh nhân vật chính bị hại chết ở kiếp trước rồi mở mắt tỉnh dậy ở thời điểm quá khứ, hoặc đang ở hiện đại thì xuyên vào thân xác một nhân vật phụ pháo hôi.
+   - **Cách dẫn chuyện chuẩn:** Phải dùng từ khóa định vị thời không thật rõ ràng (*"Ở kiếp trước, chỉ vì mù quáng tin lời gã tra nam mà cô phải bỏ mạng nơi ngục tối. Thế nhưng ông trời có mắt, khi mở mắt ra lần nữa, cô phát hiện mình đã sống lại vào đúng ngày..."* hoặc *"Vừa mở mắt ra, cô gái hiện đại bàng hoàng nhận ra mình đã xuyên vào cuốn tiểu thuyết ngược tâm, lại còn trúng ngay vai ác nữ sắp bị cả gia tộc xử tử..."*).
+2. **Phân biệt "Lời nói ngoài miệng" và "Tiếng lòng / Âm thanh Hệ thống" trong SRT:**
+   - Trong phim xuyên không / đọc tâm (读心术) hoặc có Hệ thống (系统), file `.srt` gốc ghi lẫn lộn cả câu nhân vật nói ra miệng lẫn câu nhân vật đang nghĩ thầm trong bụng (hoặc tiếng máy báo của Hệ thống).
+   - **Cách dẫn chuyện chuẩn:** Luôn dẫn rõ trạng thái để tạo sự hài hước và kịch tính:
+     - *Ví dụ Đọc tâm:* *"Ngoài mặt cô nàng vẫn giữ vẻ ngoan ngoãn vâng dạ, nhưng trong lòng lại thầm mắng tên vương gia trước mặt là kẻ mù mắt mới đi tin lời ả bạch liên hoa kia. Trớ trêu thay, cô chẳng hề biết rằng toàn bộ tiếng lòng ấy đều đã lọt hết vào tai những người xung quanh."*
+     - *Ví dụ Hệ thống:* *"Đúng lúc ngàn cân treo sợi tóc, âm thanh cơ giới của hệ thống bất ngờ vang lên trong đầu, giao cho cô nhiệm vụ vả mặt kẻ phản diện để đổi lấy phần thưởng cứu mạng."*
+3. **Việt hóa mượt mà các thuật ngữ mạng Trung Quốc (Slang chuyển thành văn kể chuyện):**
+   - Không dịch cứng các từ lóng khó hiểu với người xem phổ thông:
+     - `炮灰 (Pháo hôi)` → *kẻ thế mạng / con tốt thí / nhân vật phụ đoản mệnh*.
+     - `白莲花 / 绿茶 (Bạch liên hoa / Trà xanh)` → *ả đàn bà giả tạo / kẻ ngoài mặt ngây thơ nhưng tâm địa độc ác*.
+     - `金手指 (Kim thủ chỉ)` → *bàn tay vàng / năng lực đặc biệt*.
+     - `舔狗 (Thiểm cẩu)` → *kẻ si tình mù quáng / kẻ lụy tình bất chấp tự trọng*.
+     - `打脸 (Đả kiểm)` → *màn vả mặt cực gắt / đòn phản kích khiến đối phương cứng họng*.
+4. **Xử lý chênh lệch bối cảnh Cổ đại – Hiện đại:**
+   - Khi nhân vật dùng kiến thức hiện đại (y thuật, kinh doanh, hóa học, tâm lý) để giải quyết rắc rối thời cổ đại/thập niên 80, hãy nhấn mạnh sự kinh ngạc của người xung quanh để tạo cảm giác "sảng văn" (thỏa mãn cho người xem).
+
+### 13.7. Cơ chế Tự động thích ứng Khung ngang (16:9) và Khung dọc (9:16)
+Bộ code trong `pipeline/` đã được nâng cấp để **tự động nhận diện cả video dọc (`9:16`) lẫn video ngang (`16:9`)** mà không cần sửa code tay:
+1. Khi chạy `python pipeline\detect_subband.py`, script tự động kiểm tra kích thước thật của `1.mp4` (`src_w`, `src_h`), dò tìm vị trí phụ đề Trung ở nửa dưới khung hình, tự tạo mặt nạ viền mềm `work/band_mask.png` đúng kích thước và xuất cấu hình ra `work/video_meta.json`.
+2. Các script `contact_sheets.py`, `overlay_text.py`, `assemble.py` và `qa_sheet.py` tự động đọc `work/video_meta.json`:
+   - **Nếu video dọc (`9:16`):** Xuất `1080×1920`, cỡ chữ phụ đề `64`, tối đa `30` ký tự/dòng (`58` ký tự/cụm).
+   - **Nếu video ngang (`16:9`):** Xuất `1920×1080`, cỡ chữ phụ đề `48`, tối đa `44` ký tự/dòng (`82` ký tự/cụm), ảnh lưới QA tự xoay sang khung ngang `320×180`.
+   - **Nếu video gốc sạch (không có sub cứng):** Tự động tắt bộ lọc làm mờ `boxblur` để giữ nguyên 100% độ nét gốc.
 
 ---
 

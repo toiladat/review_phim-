@@ -1,11 +1,22 @@
 """Flag shots that contain burned-in overlay text (name cards, location captions,
 'to be continued' cards) OUTSIDE the subtitle band. Output: work/shot_flags.json"""
-import cv2, numpy as np, json, sys
+import cv2, glob, numpy as np, json, os, sys
 
-SRC = r"d:\final_I2V\review_tool\1.mp4"
-shots = json.load(open(r"d:\final_I2V\review_tool\work\shots.json"))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+inp_dir = os.path.join(ROOT, "input")
+cands = sorted(glob.glob(os.path.join(inp_dir, "*.mp4")))
+SRC = os.path.join(inp_dir, "1.mp4") if os.path.exists(os.path.join(inp_dir, "1.mp4")) else (cands[0] if cands else os.path.join(ROOT, "1.mp4"))
+WORK = os.path.join(ROOT, "work")
+shots = json.load(open(os.path.join(WORK, "shots.json")))
 cap = cv2.VideoCapture(SRC)
-SUB_Y0, SUB_Y1 = 1235, 1585  # source coords of normal subtitle band
+src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1920
+
+meta_p = os.path.join(WORK, "video_meta.json")
+if os.path.exists(meta_p):
+    meta = json.load(open(meta_p))
+    SUB_Y0, SUB_Y1 = meta["sub_y0"], meta["sub_y1"]
+else:
+    SUB_Y0, SUB_Y1 = (1235, 1585) if src_h > 1200 else (int(src_h * 0.75), int(src_h * 0.95))
 
 
 def score(img):
@@ -40,6 +51,5 @@ for k, (a, b) in enumerate(shots):
     flags.append(sc)
     if k % 200 == 0:
         print(k, flush=True)
-json.dump(flags, open(r"d:\final_I2V\review_tool\work\shot_flags.json", "w"))
+json.dump(flags, open(os.path.join(WORK, "shot_flags.json"), "w"))
 print("done")
-

@@ -3,17 +3,32 @@
 
 Stages (cached in work/):
   audio  : trim TTS mp3 -> wav, measure durations
-  plan   : choose source segments for each beat (shot-aware, avoids repeats & "to be continued" cards)
-  beats  : render one mp4 per beat (zoom, blur hard-sub band, original audio ducked)
-  final  : concat beats, build narration track, burn Vietnamese ASS subtitles, mix, export
+  plan   : choose source segments for each beat + detect tight 2D subtitle box per segment
+  beats  : render one mp4 per beat (zoom, tight 2D feathered blur over Chinese sub only, video-only)
+  final  : concat beats, build pure Vietnamese narration track (no original audio, no burned-in subs/title),
+           mux & export output/review_vi.mp4 + output/review_vi.srt + output/kich_ban_review.txt
 """
-import json, math, os, re, subprocess, sys, wave
+import glob, json, math, os, re, subprocess, sys, wave
+from concurrent.futures import ThreadPoolExecutor
+import cv2, numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from script_beats import BEATS, TITLE
 
-ROOT = r"d:\final_I2V\review_tool"
-SRC = os.path.join(ROOT, "1.mp4")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _find_input(ext, default_name):
+    inp_dir = os.path.join(ROOT, "input")
+    p1 = os.path.join(inp_dir, default_name)
+    if os.path.exists(p1):
+        return p1
+    cands = sorted(glob.glob(os.path.join(inp_dir, f"*.{ext}")))
+    return cands[0] if cands else os.path.join(ROOT, default_name)
+
+
+SRC = _find_input("mp4", "1.mp4")
+SRT_PATH = _find_input("srt", "1.srt")
 WORK = os.path.join(ROOT, "work")
 FF = os.path.join(ROOT, "tools", "ffmpeg.exe")
 TTS_DIR = os.path.join(WORK, "tts", "narration")
@@ -24,12 +39,43 @@ FPS_NUM, FPS_DEN = 30000, 1001
 FPS = FPS_NUM / FPS_DEN
 PAUSE = 0.14          # silence between beats (s)
 SEG_TARGET = 2.9      # preferred visual segment length (s)
-ORIG_VOL = 0.13       # original soundtrack volume under narration
+ORIG_VOL = 0.0        # original soundtrack muted (0.0 = pure Vietnamese narration)
+BURN_SUBS = False     # do not burn Vietnamese subtitles or title onto the video
 W, H = 1080, 1920
 ZOOM = 1.05
-BAND_Y, BAND_H = 1215, 430   # blurred band covering burned-in Chinese subs (after zoom)
+BAND_Y, BAND_H = 1215, 430
+HAS_HARDSUB = True
+META_P = os.path.join(WORK, "video_meta.json")
+if os.path.exists(META_P):
+    _meta = json.load(open(META_P))
+    W, H = _meta.get("W", W), _meta.get("H", H)
+    BAND_Y, BAND_H = _meta.get("band_y", BAND_Y), _meta.get("band_h", BAND_H)
+    HAS_HARDSUB = _meta.get("has_hardsub", True)
+IS_LANDSCAPE = W >= H
+MASK_2D = os.path.join(WORK, "band_mask_2d.png")
+MASK_1D = os.path.join(WORK, "band_mask_1d.png")
 for d in (AUD, SEG, OUT):
     os.makedirs(d, exist_ok=True)
+
+
+def ensure_2d_mask():
+    """Create 2D and 1D cosine-feathered alpha masks with a wide solid core."""
+    mw, mh = 400, 160
+    fx, fy = 14, 18
+    mx = np.ones(mw, dtype=np.float32)
+    my = np.ones(mh, dtype=np.float32)
+    for i in range(fx):
+        v = 0.5 * (1.0 - math.cos(math.pi * (i + 1) / (fx + 1)))
+        mx[i] = v
+        mx[mw - 1 - i] = v
+    for i in range(fy):
+        v = 0.5 * (1.0 - math.cos(math.pi * (i + 1) / (fy + 1)))
+        my[i] = v
+        my[mh - 1 - i] = v
+    mask2d = (np.outer(my, mx) * 255.0).round().astype(np.uint8)
+    mask1d = (np.outer(my, np.ones(mw, dtype=np.float32)) * 255.0).round().astype(np.uint8)
+    cv2.imwrite(MASK_2D, mask2d)
+    cv2.imwrite(MASK_1D, mask1d)
 
 
 def run(cmd, quiet=True):
@@ -42,8 +88,10 @@ def run(cmd, quiet=True):
 
 
 def ts(s):
-    m = re.match(r"(\d+):(\d+)", s.strip())
-    return int(m.group(1)) * 60 + int(m.group(2))
+    parts = [int(x) for x in s.strip().split(":")]
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return parts[0] * 60 + parts[1]
 
 
 def parse_windows(spec):
@@ -68,7 +116,6 @@ def stage_audio():
         if not os.path.exists(src):
             raise SystemExit(f"missing TTS {src}")
         if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
-            # trim leading/trailing silence ("remove air")
             af = ("silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.03,"
                   "areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.06,areverse")
             run([FF, "-y", "-i", src, "-af", af, "-ar", "48000", "-ac", "1", dst])
@@ -84,7 +131,7 @@ def load_exclusions():
     subs = json.load(open(os.path.join(WORK, "srt_condensed.json"), encoding="utf-8"))
     ex = []
     for st, en, tx in subs:
-        if "待续" in tx or "剧终" in tx or "待" in tx and "续" in tx:
+        if "待续" in tx or "剧终" in tx or ("待" in tx and "续" in tx):
             ex.append((st - 1.6, en + 1.2))
     return ex
 
@@ -122,8 +169,7 @@ def pieces_for(windows, shots, excl, used, min_len=1.0):
 
 
 def choose(pieces, D, seg_max=3.6):
-    """Pick segments (a, b, speed) from ordered pieces to fill D seconds.
-    Spread picks evenly over the window so the visuals follow the story progression."""
+    """Pick segments (a, b, speed) from ordered pieces to fill D seconds."""
     L = sum(b - a for a, b in pieces)
     if L <= 0:
         return None
@@ -132,13 +178,12 @@ def choose(pieces, D, seg_max=3.6):
         segs = [(a, b, speed) for a, b in pieces]
         got = L / speed
         k = 0
-        while got < D - 0.02:  # still short -> reuse pieces again (rare)
+        while got < D - 0.02:
             a, b = pieces[k % len(pieces)]
             segs.append((a, b, speed))
             got += (b - a) / speed
             k += 1
         return segs
-    # split long pieces into sub-pieces of <= seg_max so pacing stays lively
     subs = []
     for a, b in pieces:
         n = max(1, math.ceil((b - a) / (seg_max + 1.0)))
@@ -152,12 +197,11 @@ def choose(pieces, D, seg_max=3.6):
         if sum(caps[i] for i in idx) >= D:
             pick = idx
             break
-    if pick is None:  # need the full lengths
+    if pick is None:
         pick = list(range(len(subs)))
         caps = [b - a for a, b in subs]
     lens = [caps[i] for i in pick]
     excess = sum(lens) - D
-    # trim excess proportionally, keep >= 0.9 s
     while excess > 1e-3:
         room = [max(l - 0.9, 0) for l in lens]
         tr = sum(room)
@@ -177,6 +221,149 @@ def choose(pieces, D, seg_max=3.6):
         sp = max(tot / D, 0.62)
         segs = [(s, e, sp) for s, e, _ in segs]
     return segs
+
+
+def _expected_y_zoomed(t):
+    if IS_LANDSCAPE:
+        return (min(int(H * 0.74), max(0, BAND_Y - 10)),
+                max(int(H * 0.96), min(H, BAND_Y + BAND_H + 10)))
+    return (min(1235, max(0, BAND_Y - 10)),
+            max(1618, min(H, BAND_Y + BAND_H + 10)))
+
+
+def _detect_sub_zoomed(zimg, t):
+    ya, yb = _expected_y_zoomed(t)
+    x_margin = 12
+    roi = zimg[ya:yb, x_margin:W - x_margin]
+    g = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    white = (g > 195).astype(np.uint8)
+    dark = cv2.dilate((g < 95).astype(np.uint8), np.ones((7, 7), np.uint8))
+    edge = white & dark
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(edge, 8)
+    valid = np.zeros_like(edge)
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if 4 <= area <= 3500 and w < 150 and h < 125:
+            valid[lab == i] = 1
+    prof = valid.sum(1)
+    ys = np.where(prof > 5)[0]
+    if len(ys) < 7:
+        return None
+    groups = np.split(ys, np.where(np.diff(ys) > 18)[0] + 1)
+    gbest = max(groups, key=len)
+    if len(gbest) < 9 or len(gbest) > 220:
+        return None
+    y0, y1 = int(gbest[0]) + ya, int(gbest[-1]) + ya
+    sub_slice = valid[gbest[0]:gbest[-1] + 1, :]
+    xs = np.where(sub_slice.sum(0) > 1)[0]
+    if len(xs) < 8:
+        return None
+    x0, x1 = int(xs[0]) + x_margin, int(xs[-1]) + x_margin
+    return (x0, y0, x1, y1)
+
+
+def detect_all_seg_boxes(plan):
+    """Multi-threaded detection of tight 2D subtitle bounding box for every segment in plan."""
+    zw, zh = round(W * ZOOM / 2) * 2, round(H * ZOOM / 2) * 2
+    cx, cy = (zw - W) // 2, (zh - H) // 2
+
+    srt_lines = []
+    srt_p = SRT_PATH
+    if os.path.exists(srt_p):
+        raw_srt = open(srt_p, encoding="utf-8", errors="ignore").read()
+        for blk in re.split(r"\n\s*\n", raw_srt.strip()):
+            ls = [x.strip() for x in blk.splitlines() if x.strip()]
+            if len(ls) >= 2:
+                m = re.match(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)", ls[1] if ls[0].isdigit() else ls[0])
+                if m:
+                    g = [int(x) for x in m.groups()]
+                    t0 = g[0]*3600 + g[1]*60 + g[2] + g[3]/1000.0
+                    t1 = g[4]*3600 + g[5]*60 + g[6] + g[7]/1000.0
+                    txt = "\n".join(ls[2:] if ls[0].isdigit() else ls[1:])
+                    srt_lines.append((t0, t1, txt))
+
+    tasks = []
+    for p in plan:
+        for k, s in enumerate(p["segs"]):
+            tasks.append((p["i"], k, s[0], s[1]))
+
+    def worker(chunk):
+        cap = cv2.VideoCapture(SRC)
+        out = []
+        for bi, sk, a, b in chunk:
+            boxes = []
+            for frac in (0.08, 0.22, 0.36, 0.50, 0.64, 0.78, 0.92):
+                t = a + (b - a) * frac
+                cap.set(cv2.CAP_PROP_POS_MSEC, float(t) * 1000.0)
+                ok, img = cap.read()
+                if ok and img is not None:
+                    zimg = cv2.resize(img, (zw, zh), interpolation=cv2.INTER_LINEAR)[cy:cy + H, cx:cx + W]
+                    bx = _detect_sub_zoomed(zimg, t)
+                    if bx is not None:
+                        boxes.append(bx)
+            max_ch = 0
+            for t0, t1, txt in srt_lines:
+                if t1 >= a - 0.12 and t0 <= b + 0.12:
+                    for l in txt.splitlines():
+                        max_ch = max(max_ch, len(l.strip()))
+            out.append((bi, sk, a, b, boxes, max_ch))
+        cap.release()
+        return out
+
+    n_workers = 8
+    chunks = [tasks[i::n_workers] for i in range(n_workers)]
+    raw_res = []
+    with ThreadPoolExecutor(n_workers) as ex:
+        for res in ex.map(worker, chunks):
+            raw_res.extend(res)
+    raw_res.sort(key=lambda x: (x[0], x[1]))
+
+    # Collect valid (t_mid, y0, y1) anchors from detected boxes for clean vertical interpolation
+    y_anchors = []
+    for bi, sk, a, b, boxes, max_ch in raw_res:
+        if boxes:
+            y0 = int(np.median([b_[1] for b_ in boxes]))
+            y1 = int(np.median([b_[3] for b_ in boxes]))
+            if y1 - y0 >= 38:
+                y_anchors.append(((a + b) * 0.5, y0, y1))
+
+    def interp_y(t_mid):
+        if not y_anchors:
+            return (BAND_Y + 25, BAND_Y + min(95, BAND_H - 25))
+        nearest = min(y_anchors, key=lambda x: abs(x[0] - t_mid))
+        return (nearest[1], nearest[2])
+
+    char_px = 54 if IS_LANDSCAPE else 72
+    for bi, sk, a, b, boxes, max_ch in raw_res:
+        if boxes or max_ch > 0:
+            if boxes:
+                x0 = min(b_[0] for b_ in boxes)
+                y0 = int(np.median([b_[1] for b_ in boxes]))
+                x1 = max(b_[2] for b_ in boxes)
+                y1 = int(np.median([b_[3] for b_ in boxes]))
+                if y1 - y0 < 56:
+                    ny0, ny1 = interp_y((a + b) * 0.5)
+                    y0 = min(y0, ny0)
+                    y1 = max(y1, ny1)
+            else:
+                y0, y1 = interp_y((a + b) * 0.5)
+                x0, x1 = W // 2 - 120, W // 2 + 120
+            est_w = min(W, max_ch * char_px)
+            if est_w > (x1 - x0):
+                x_mid = (x0 + x1) // 2
+                x0 = max(0, x_mid - est_w // 2)
+                x1 = min(W, x_mid + est_w // 2)
+            pad_x, pad_y = 66, 24
+            bx0 = 0 if (x0 - pad_x <= 36) else ((x0 - pad_x) // 2) * 2
+            bx1 = W if (x1 + pad_x >= W - 36) else ((x1 + pad_x + 1) // 2) * 2
+            by0 = max(0, ((y0 - pad_y) // 2) * 2)
+            by1 = min(H, ((y1 + pad_y + 1) // 2) * 2)
+            box = [int(bx0), int(by0), int(bx1 - bx0), int(by1 - by0)]
+        else:
+            box = None
+        s = list(plan[bi]["segs"][sk][:3])
+        s.append(box)
+        plan[bi]["segs"][sk] = s
 
 
 def stage_plan(info):
@@ -209,7 +396,10 @@ def stage_plan(info):
             raise SystemExit(f"no visuals for beat {ai['i'] + 1}: {spec}")
         used.extend((a, b) for a, b, _ in segs)
         plan.append({"i": ai["i"], "dur": D, "frames": nfr, "wav": ai["wav"], "audio_dur": ai["dur"],
-                     "text": text, "segs": segs})
+                     "text": text, "segs": [list(s) for s in segs]})
+    if HAS_HARDSUB:
+        print("detecting tight 2D subtitle boxes per segment...", flush=True)
+        detect_all_seg_boxes(plan)
     json.dump(plan, open(os.path.join(WORK, "plan.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     slow = [p["i"] + 1 for p in plan if any(s[2] < 0.95 for s in p["segs"])]
     print(f"plan ok; beats with slow-motion fill: {slow}")
@@ -224,50 +414,71 @@ def vchain():
 
 def render_beat(p, force=False):
     out = os.path.join(SEG, f"{p['i'] + 1:03d}.mp4")
-    sig = json.dumps([p["segs"], p["frames"], BAND_Y, BAND_H, ZOOM, ORIG_VOL])
+    is_first = (p["i"] == 0)
+    is_last = (p["i"] == len(BEATS) - 1)
+    sig = json.dumps([p["segs"], p["frames"], ZOOM, ORIG_VOL, "tight2d_v3", is_first, is_last])
     sigf = out + ".sig"
     if not force and os.path.exists(out) and os.path.exists(sigf) and open(sigf).read() == sig:
         return out
     cmd = [FF, "-y", "-hide_banner", "-loglevel", "error"]
     fc = []
-    for k, (a, b, sp) in enumerate(p["segs"]):
+    n = len(p["segs"])
+    for k, seg in enumerate(p["segs"]):
+        a, b, sp = seg[0], seg[1], seg[2]
         cmd += ["-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", SRC]
+    # Add 2D feathered mask input at index n and 1D mask at index n+1
+    cmd += ["-loop", "1", "-i", MASK_2D, "-loop", "1", "-i", MASK_1D]
+
+    for k, seg in enumerate(p["segs"]):
+        a, b, sp = seg[0], seg[1], seg[2]
+        box = seg[3] if len(seg) > 3 else None
         vf = f"[{k}:v]{vchain()},fps={FPS_NUM}/{FPS_DEN}"
-        af = f"[{k}:a]aresample=48000,aformat=channel_layouts=stereo"
         if sp < 0.999:
             vf += f",setpts=PTS/{sp:.4f}"
-            af += f",atempo={max(sp, 0.5):.4f}"
-        fc.append(vf + f",setpts=PTS-STARTPTS[v{k}]")
-        fc.append(af + f",asetpts=PTS-STARTPTS[a{k}]")
-    n = len(p["segs"])
-    cmd += ["-loop", "1", "-i", os.path.join(WORK, "band_mask.png")]
-    fc.append("".join(f"[v{k}][a{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=1[vc][ac]")
-    # blur the burned-in Chinese subtitle band (feathered edges via alpha mask)
-    fc.append(f"[{n}:v]format=gray,scale={W}:{BAND_H}[mk]")
-    fc.append(f"[vc]split[vb][vt];[vt]crop={W}:{BAND_H}:0:{BAND_Y},boxblur=luma_radius=42:luma_power=3:chroma_radius=20:chroma_power=2,"
-              f"eq=brightness=-0.10:saturation=0.75,format=yuva420p[bl0];[bl0][mk]alphamerge[bl];"
-              f"[vb][bl]overlay=0:{BAND_Y}:shortest=1,tpad=stop_mode=clone:stop_duration=2,format=yuv420p[vo]")
-    fc.append(f"[ac]volume={ORIG_VOL},apad[ao]")
-    cmd += ["-filter_complex", ";".join(fc), "-map", "[vo]", "-map", "[ao]",
+        vf += ",setpts=PTS-STARTPTS"
+        if HAS_HARDSUB and box is not None:
+            bx, by, bw, bh = box
+            lr = max(8, min(32, bw // 4 - 1, bh // 3 - 1))
+            cr = max(4, min(16, bw // 8 - 1, bh // 6 - 1))
+            m_idx = (n + 1) if bw >= W else n
+            fc.append(f"{vf},split[vb{k}][vt{k}]")
+            fc.append(f"[{m_idx}:v]format=gray,scale={bw}:{bh}[mk{k}]")
+            fc.append(f"[vt{k}]crop={bw}:{bh}:{bx}:{by},"
+                      f"boxblur=luma_radius={lr}:luma_power=3:chroma_radius={cr}:chroma_power=2,"
+                      f"format=yuva420p[bl0_{k}];[bl0_{k}][mk{k}]alphamerge[bl{k}];"
+                      f"[vb{k}][bl{k}]overlay={bx}:{by}:shortest=1,format=yuv420p[v{k}]")
+        else:
+            fc.append(f"{vf},format=yuv420p[v{k}]")
+
+    v_concat = "".join(f"[v{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0,tpad=stop_mode=clone:stop_duration=2"
+    if is_first:
+        v_concat += ",fade=t=in:st=0:d=0.5"
+    if is_last:
+        v_concat += f",fade=t=out:st={max(0.0, p['dur'] - 1.2):.2f}:d=1.2"
+    fc.append(v_concat + ",format=yuv420p[vo]")
+
+    cmd += ["-filter_complex", ";".join(fc), "-map", "[vo]", "-an",
             "-frames:v", str(p["frames"]), "-t", f"{p['dur']:.4f}", "-r", f"{FPS_NUM}/{FPS_DEN}",
             "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0", "-g", "60",
-            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", out]
+            "-pix_fmt", "yuv420p", out]
     run(cmd)
     open(sigf, "w").write(sig)
     return out
 
 
 def stage_beats(plan, only=None):
-    from concurrent.futures import ThreadPoolExecutor
+    ensure_2d_mask()
     todo = [p for p in plan if only is None or p["i"] + 1 in only]
     with ThreadPoolExecutor(3) as ex:
         for k, o in enumerate(ex.map(render_beat, todo)):
-            if k % 10 == 0:
+            if k % 10 == 0 or k + 1 == len(todo):
                 print("rendered", k + 1, "/", len(todo), flush=True)
 
 
 # ---------------------------------------------------------------- subtitles
-def split_chunks(text, maxlen=58):
+def split_chunks(text, maxlen=None):
+    if maxlen is None:
+        maxlen = 82 if IS_LANDSCAPE else 58
     parts = re.split(r"(?<=[,.:;?!])\s+", text.strip())
     chunks = []
     cur = ""
@@ -281,7 +492,6 @@ def split_chunks(text, maxlen=58):
             cur = p
     if cur:
         chunks.append(cur)
-    # hard-split very long chunks on spaces
     res = []
     for c in chunks:
         while len(c) > maxlen + 12:
@@ -292,7 +502,9 @@ def split_chunks(text, maxlen=58):
     return res
 
 
-def wrap2(c, maxline=30):
+def wrap2(c, maxline=None):
+    if maxline is None:
+        maxline = 44 if IS_LANDSCAPE else 30
     if len(c) <= maxline:
         return c
     words = c.split()
@@ -310,7 +522,16 @@ def ass_time(t):
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def build_ass(plan, path):
+def srt_time(t):
+    ms = round(max(t, 0) * 1000)
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def build_ass_and_srt(plan, ass_path, srt_path, script_path):
+    sub_fs = 48 if IS_LANDSCAPE else 64
     head = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -320,15 +541,15 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,Roboto,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,2,5,40,40,0,1
-Style: Title,Roboto,58,&H0000E5FF,&H00FFFFFF,&H00000000,&HA0000000,1,0,0,0,100,100,1,0,3,14,0,8,30,30,70,1
+Style: Sub,Roboto,{sub_fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,2,5,40,40,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     ev = []
+    srt_blocks = []
+    idx = 1
     t0 = 0.0
-    hook_end = 0.0
     for p in plan:
         chunks = split_chunks(p["text"])
         weights = [max(len(c.split()), 1) + 0.6 * len(re.findall(r"[,.:;?!]", c)) for c in chunks]
@@ -337,12 +558,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for c, w_ in zip(chunks, weights):
             d = p["audio_dur"] * w_ / tot
             ev.append(f"Dialogue: 0,{ass_time(t)},{ass_time(t + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
+            srt_blocks.append(f"{idx}\n{srt_time(t)} --> {srt_time(t + d)}\n{c}\n")
+            idx += 1
             t += d
-        if p["i"] < 5:
-            hook_end = t0 + p["dur"]
         t0 += p["dur"]
-    ev.insert(0, f"Dialogue: 1,{ass_time(0)},{ass_time(hook_end)},Title,,0,0,0,,{{\\fad(400,400)}}{wrap2(TITLE, 26)}")
-    open(path, "w", encoding="utf-8-sig").write(head + "\n".join(ev) + "\n")
+    open(ass_path, "w", encoding="utf-8-sig").write(head + "\n".join(ev) + "\n")
+    open(srt_path, "w", encoding="utf-8").write("\n".join(srt_blocks))
+    open(script_path, "w", encoding="utf-8").write("\n\n".join(f"[{p['i'] + 1:03d}] {p['text']}" for p in plan) + "\n")
     return t0
 
 
@@ -356,6 +578,7 @@ def stage_final(plan, name="review_vi.mp4"):
             f.write(f"file '{bp}'\n")
     joined = os.path.join(WORK, "joined.mp4")
     run([FF, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", joined])
+
     # 2) narration track, each beat padded/trimmed to exact beat length (sample accurate, pure python)
     nar = os.path.join(WORK, "narration_full.wav")
     with wave.open(nar, "wb") as wo:
@@ -371,21 +594,31 @@ def stage_final(plan, name="review_vi.mp4"):
             data = data[:need * 2] + b"\x00\x00" * max(0, need - len(data) // 2)
             wo.writeframes(data)
             t_samples += need
-    # 3) subtitles
+
+    # 3) generate ASS/SRT/script files on disk, and mux video + pure Vietnamese narration audio
     ass = os.path.join(WORK, "subs_vi.ass")
-    total = build_ass(plan, ass)
-    ass_ff = ass.replace("\\", "/").replace(":", "\\:")
-    fonts_ff = "C\\:/Windows/Fonts"
+    srt_out = os.path.join(OUT, "review_vi.srt")
+    txt_out = os.path.join(OUT, "kich_ban_review.txt")
+    total = build_ass_and_srt(plan, ass, srt_out, txt_out)
     out = os.path.join(OUT, name)
-    vf = f"subtitles='{ass_ff}':fontsdir='{fonts_ff}',fade=t=in:st=0:d=0.5,fade=t=out:st={total - 1.2:.2f}:d=1.2"
-    af = (f"[1:a]aformat=channel_layouts=stereo,volume=1.0,acompressor=threshold=-18dB:ratio=3:attack=5:release=120[n];"
-          f"[0:a]volume=1.0[o];[n][o]amix=inputs=2:duration=first:normalize=0,"
+    af = (f"[1:a]aformat=channel_layouts=stereo,volume=1.0,"
+          f"acompressor=threshold=-18dB:ratio=3:attack=5:release=120,"
           f"loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=out:st={total - 1.2:.2f}:d=1.2[a]")
-    run([FF, "-y", "-hide_banner", "-loglevel", "error", "-i", joined, "-i", nar, "-vf", vf,
-         "-filter_complex", af, "-map", "0:v", "-map", "[a]",
-         "-c:v", "h264_nvenc", "-preset", "p6", "-rc", "vbr", "-cq", "20", "-b:v", "0", "-maxrate", "16M", "-bufsize", "32M",
-         "-profile:v", "high", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-         "-movflags", "+faststart", out])
+    if BURN_SUBS:
+        ass_ff = ass.replace("\\", "/").replace(":", "\\:")
+        fonts_ff = "C\\:/Windows/Fonts"
+        vf = f"subtitles='{ass_ff}':fontsdir='{fonts_ff}'"
+        run([FF, "-y", "-hide_banner", "-loglevel", "error", "-i", joined, "-i", nar, "-vf", vf,
+             "-filter_complex", af, "-map", "0:v", "-map", "[a]",
+             "-c:v", "h264_nvenc", "-preset", "p6", "-rc", "vbr", "-cq", "20", "-b:v", "0", "-maxrate", "16M", "-bufsize", "32M",
+             "-profile:v", "high", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+             "-movflags", "+faststart", out])
+    else:
+        # Pure video copy (no burned-in Vietnamese subs or title) + pure Vietnamese narration audio
+        run([FF, "-y", "-hide_banner", "-loglevel", "error", "-i", joined, "-i", nar,
+             "-filter_complex", af, "-map", "0:v", "-map", "[a]",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+             "-movflags", "+faststart", out])
     print(f"FINAL: {out}  ({total / 60:.2f} min)")
     return out
 
@@ -398,4 +631,3 @@ if __name__ == "__main__":
         stage_beats(plan)
     if "final" in stages:
         stage_final(plan)
-

@@ -1,11 +1,18 @@
-"""QA contact sheets of the final output: one frame per beat (midpoint), labelled."""
+"""QA contact sheets of the final output: one frame per beat (midpoint), labelled.
+Automatically adapts thumbnail dimensions for 9:16 vertical vs 16:9 horizontal outputs."""
 import cv2, json, numpy as np, os, sys
 
-ROOT = r"d:\final_I2V\review_tool"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "output", "review_vi.mp4")
 plan = json.load(open(os.path.join(ROOT, "work", "plan.json"), encoding="utf-8"))
 cap = cv2.VideoCapture(out)
-TW, TH, COLS, ROWS = 180, 320, 8, 4
+vw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1080
+vh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1920
+if vw >= vh:
+    TW, TH, COLS, ROWS = 320, 180, 5, 6
+else:
+    TW, TH, COLS, ROWS = 180, 320, 8, 4
+
 t = 0
 frames = []
 for p in plan:
@@ -26,4 +33,3 @@ for s in range(0, len(frames), per):
         sheet[r * TH:(r + 1) * TH, c * TW:(c + 1) * TW] = f
     cv2.imwrite(os.path.join(ROOT, "work", "qa", f"qa_{s // per + 1}.jpg"), sheet, [cv2.IMWRITE_JPEG_QUALITY, 82])
 print("ok")
-
