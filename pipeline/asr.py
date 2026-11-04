@@ -40,7 +40,6 @@ extra = " ".join(args).strip()
 prompt = "以下是普通话的句子，请使用简体中文标点符号。" + (f" {extra}" if extra else "")
 
 t0 = time.time()
-model = WhisperModel("large-v3", device="cuda", compute_type="float16")
 
 gaps = []
 if not force_full and os.path.exists(SRT_JSON):
@@ -56,6 +55,13 @@ if not force_full and os.path.exists(SRT_JSON):
         prev = max(prev, en)
     if dur - prev > 40.0:
         gaps.append((max(0.0, prev - 1.0), dur))
+    if not gaps:
+        json.dump([], open(OUT, "w", encoding="utf-8"))
+        open(GAPS_TXT, "w", encoding="utf-8").write("")
+        print("No SRT gaps > 40s found; skipping Whisper ASR.", round(time.time() - t0, 2))
+        sys.exit(0)
+
+model = WhisperModel("large-v3", device="cuda", compute_type="float16")
 
 res = []
 if gaps:

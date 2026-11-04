@@ -97,3 +97,4 @@ Mỗi beat phải là một câu văn dày dặn, giàu nhịp điệu gồm 3 l
 ### 2.6. Quy tắc Chọn Cửa Sổ Thời Gian (`spec`) Không Bị Làm Chậm (`slow: []`)
 - Ở tốc độ TTS `1.08`, giọng đọc phát âm khoảng `4,2 âm tiết/giây`. Một beat 60 âm tiết cần ~14,5 giây hình ảnh.
 - Luôn đặt cửa sổ thời gian nguồn cho mỗi beat rộng tối thiểu **35 – 70 giây** (ví dụ `"0:03:41-0:04:35"`) để thuật toán chọn được những cú máy đẹp nhất, rải đều theo diễn biến mà không bao giờ phải làm chậm khung hình.
+

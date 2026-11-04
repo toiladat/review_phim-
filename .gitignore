@@ -6,3 +6,5 @@ work/*
 1.srt
 __pycache__/
 *.pyc
+
+tools/
