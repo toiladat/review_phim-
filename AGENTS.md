@@ -1,6 +1,6 @@
 # 🎬 HƯỚNG DẪN BẮT BUỘC CHO AI AGENT (AUTO-LOADED WORKSPACE RULES)
 
-Khi người dùng yêu cầu xử lý / làm video review cho một tập phim mới trong thư mục này (ví dụ: *"xử lý tập mới giúp tôi"*, *"chạy review tập X nhé"*), bạn **BẮT BUỘC** phải tuân thủ tuyệt đối quy trình kỹ thuật và văn phong **Người Kể Chuyện (Storyteller)** dưới đây (xem chi tiết đầy đủ hơn trong `README.md`).
+Khi người dùng yêu cầu xử lý / làm video review cho một tập phim mới trong thư mục này (ví dụ: *"xử lý tập mới giúp tôi"*, *"chạy review tập X nhé"*), bạn **BẮT BUỘC** phải tuân thủ tuyệt đối quy trình kỹ thuật, cấu trúc **30s Mở Màn Thoại Gốc Cao Trào (Cold Open Dubbing)** và văn phong **Người Kể Chuyện (Storyteller)** dưới đây (xem chi tiết đầy đủ hơn trong `README.md`).
 
 ---
 
@@ -12,7 +12,7 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
   - Nếu người dùng nói **"không cần che mờ sub"**, đặt `BLUR_SUBS = False` trong `pipeline/assemble.py`.
   - Nếu người dùng **cần che mờ sub Trung**, đặt `BLUR_SUBS = True` trong `pipeline/assemble.py` (thuật toán `detect_all_seg_boxes` sẽ tự động dò hộp chữ 2D ôm sát từng câu thoại kết hợp nội suy tọa độ dọc `interp_y` từ file `.srt`).
 - Luôn giữ mặc định trong `pipeline/assemble.py`:
-  - `ORIG_VOL = 0.0` (tắt hoàn toàn tiếng video gốc, chỉ giữ 100% giọng lồng tiếng Việt).
+  - `ORIG_VOL = 0.0` (tắt hoàn toàn tiếng video gốc ở phần Review, chỉ giữ 100% giọng lồng tiếng Việt; ở phần 30s mở màn có thể giữ tiếng động đắt giá như tiếng tát/đập vỡ qua `sfx_lead_sec`).
   - `BURN_SUBS = False` (không chèn phụ đề tiếng Việt hay tiêu đề góc trên vào video; xuất phụ đề rời ra `output/review_vi.srt`).
 
 ### Bước 2: Chạy tiền xử lý (Chạy song song để tối ưu tốc độ)
@@ -28,28 +28,41 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
    - `python -u pipeline/contact_sheets.py` (xuất ~22 bảng ảnh tổng quan vào `work/sheets/`).
 3. Sau khi `shots.py` hoàn tất, chạy `python -u pipeline/overlay_text.py` để lọc bỏ các cảnh dính thẻ tên nhân vật / chữ nổi ngoài vùng sub.
 
-### Bước 3: Đọc toàn bộ cốt truyện & Viết kịch bản `pipeline/script_beats.py`
+### Bước 3: Đọc toàn bộ cốt truyện & Viết kịch bản `pipeline/script_beats.py` (Gồm `INTRO_DUB` 30s + `BEATS` Review)
 - Đọc toàn bộ `work/srt_condensed.txt`, `work/asr_gaps.txt` và xem các tấm ảnh trong `work/sheets/*.jpg` để nắm rõ nhân vật, diễn biến và cao trào.
 - Lập **Bảng tên nhân vật Hán Việt chuẩn** và giữ thống nhất từ đầu đến cuối.
-- Viết khoảng **115 – 123 beat** (tổng cộng **~7.000 – 7.800 âm tiết**, tương đương video review dài **24 – 26 phút**) vào `pipeline/script_beats.py`.
-- Chạy lệnh kiểm tra tự động để đảm bảo **0 ký tự cấm** (`:`, `;`, `0-9`, `"`, `'`, `()`, chữ Hán):
+- Kịch bản trong `pipeline/script_beats.py` bắt buộc gồm **2 phần nối tiếp nhau**:
+  1. **`INTRO_DUB` (~30 giây Mở màn Lồng tiếng Thoại gốc Cay nghiệt / Gay cấn – TUYỆT ĐỐI KHÔNG SPOIL KẾT QUẢ):**
+     - **QUY TẮC CHỌN CẢNH (CẤM SPOIL KẾT CỤC):** Chọn phân cảnh **cay nghiệt, ức chế tột độ** (bị sỉ nhục, bị phản bội phũ phàng, bị vu oan giá họa, bị chà đạp kỷ vật...) hoặc phân cảnh **gay cấn đang bỏ lửng trước khi lật kèo**. **TUYỆT ĐỐI KHÔNG** lấy cảnh kết quả cuối phim (như cảnh phản diện đã bị trừng phạt phá sản hay cảnh lộ diện thân phận giải quyết xong xuôi) đưa lên 30s đầu vì sẽ làm mất sự tò mò của khán giả.
+     - Gọt bỏ các đoạn thoại phụ rườm rà ở giữa để cô đọng các câu va chạm cay nghiệt/gay cấn nhất trong khoảng **28 – 35 giây** (`3 – 6` cụm cảnh gốc liền mạch `block_id`).
+     - **QUY TẮC TÁCH VOICE NGẮT NGHỈ TỰ NHIÊN (BẮT BUỘC):** Tuyệt đối **KHÔNG gộp nhiều câu thoại thành 1 đoạn dài ngoằng** bắt TTS đọc liền một hơi. Chỗ nào trong `.srt` gốc nhân vật ngắt câu, lấy hơi hoặc chuyển ý thì **bắt buộc tách thành 1 phần tử riêng trong `INTRO_DUB`** (mỗi câu/vế ngắn chỉ **4 – 15 âm tiết**, dài **0.8 – 3.0 giây**, tổng cộng **12 – 16 câu thoại ngắn** cho 30 giây mở màn) để TTS đọc thành **một file voice mới riêng biệt**, kèm khoảng nghỉ `post_pause_sec` (`0.20s – 0.60s`) khớp với khẩu hình và nhịp chuyển góc máy trên màn hình.
+     - Định dạng mỗi dòng trong `INTRO_DUB`:
+       `(block_id, "h:mm:ss.s", sfx_lead_sec, post_pause_sec, "Câu thoại ngắn")`.
+     - Ngay sau câu thoại cuối cùng của `INTRO_DUB` (điểm cắt Cliffhanger), `assemble.py` sẽ tự động chèn **0.55 giây khựng hình chuyển cảnh (Freeze Frame + Fade tối dần)** trước khi vào `BEATS`.
+  2. **`BEATS` (Phần Review Người Kể Chuyện – Khoảng 112 – 120 beat, ~7.000 – 7.600 âm tiết):**
+     - **Beat 1 – Beat 2 (Cầu nối Mở Vòng Lặp Tò Mò – Không Spoil Kết Cục):** Nối tiếp ngay sau điểm cắt 30s mở màn (bằng ngôi thứ ba Người Kể Chuyện) để xoáy sâu vào sự cay nghiệt/bất công vừa diễn ra và hé mở ẩn ý rằng kẻ phản diện thực dụng kia vừa tự tay vứt bỏ cơ hội đổi đời mà không hề hay biết (giữ kín kết cục để dẫn dắt người xem theo dõi từ đầu phim).
+     - **Beat 3 trở đi:** Kể tuyến tính toàn bộ câu chuyện theo phong cách Người Kể Chuyện ngôi thứ ba.
+- Chạy lệnh kiểm tra tự động để đảm bảo **0 ký tự cấm** (`:`, `;`, `0-9`, `"`, `'`, `()`, chữ Hán) trong cả `INTRO_DUB` và `BEATS`:
   ```powershell
-  python -c "import sys,re; sys.path.insert(0,'pipeline'); from script_beats import BEATS; bad=[i+1 for i,(_,t) in enumerate(BEATS) if re.search(r'[:;0-9\x22\x27()\u4e00-\u9fff]', t)]; print('beats:', len(BEATS), 'syllables:', sum(len(t.split()) for _,t in BEATS), 'bad:', bad)"
+  python -c "import sys,re; sys.path.insert(0,'pipeline'); import script_beats as sb; intro=getattr(sb,'INTRO_DUB',[]); beats=sb.BEATS; bad_i=[i+1 for i,x in enumerate(intro) if re.search(r'[:;0-9\x22\x27()\u4e00-\u9fff]', x[4])]; bad_b=[i+1 for i,(_,t) in enumerate(beats) if re.search(r'[:;0-9\x22\x27()\u4e00-\u9fff]', t)]; print('intro_lines:', len(intro), 'beats:', len(beats), 'syllables:', sum(len(t.split()) for _,t in beats), 'bad_intro:', bad_i, 'bad_beats:', bad_b)"
   ```
-  *(Kết quả `bad` bắt buộc phải là `[]`)*.
+  *(Kết quả `bad_intro` và `bad_beats` bắt buộc phải là `[]`)*.
 
 ### Bước 4: Lồng tiếng qua MCP `dgt-auto-tts`
 1. Xóa sạch cache âm thanh cũ (`work/tts/narration/*.mp3` và `work/aud/*.wav`).
-2. Xuất `BEATS` ra file `work/tts/narration.srt` (mỗi beat là 1 entry SRT riêng biệt, **tuyệt đối không nạp file `.txt`** để tránh app tự gộp dòng).
+2. Xuất toàn bộ các câu ngắn của `INTRO_DUB` (`1 .. M`) nối tiếp với `BEATS` (`M+1 .. M+N`) ra file `work/tts/narration.srt` (mỗi câu thoại ngắn trong `INTRO_DUB` và mỗi beat trong `BEATS` là **1 entry SRT riêng biệt** để app tạo file voice mới cho từng câu, **tuyệt đối không nạp file `.txt`**):
+   ```powershell
+   python pipeline/assemble.py make_srt
+   ```
 3. Gọi MCP `dgt-auto-tts`:
-   - `get_status` -> kiểm tra giọng `viet_review_dt6Rssa4`, model `speech-02-hd`.
+   - `get_status` -> kiểm tra giọng đang dùng (ví dụ `viet_rv_dt6dOAIc` / `viet_review_dt6Rssa4`), model `speech-02-hd`.
    - `set_tts_settings(change_speed=True, speed=1.08)`
-   - `load_input(file_path="...\\work\\tts\\narration.srt")` -> kiểm tra `total_lines == len(BEATS)` và `short_lines == []`.
-   - `start_tts(merge_short_lines=False)` -> chờ `done == len(BEATS)` rồi trả tốc độ về `set_tts_settings(change_speed=False, speed=1.0)`.
+   - `load_input(file_path="...\\work\\tts\\narration.srt")` -> kiểm tra `total_lines == len(INTRO_DUB) + len(BEATS)` và `short_lines == []`.
+   - `start_tts(merge_short_lines=False)` -> chờ `done == total_lines` rồi trả tốc độ về `set_tts_settings(change_speed=False, speed=1.0)`.
 
 ### Bước 5: Dựng video, Kiểm tra QA & Xuất Bộ SEO
 1. Chạy `python -u pipeline/assemble.py audio plan` -> kiểm tra `beats with slow-motion fill: []` (nếu có beat bị làm chậm, mở rộng cửa sổ thời gian nguồn của beat đó trong `script_beats.py` rồi chạy lại `plan`).
-2. Chạy `python -u pipeline/assemble.py beats final` để xuất `output/review_vi.mp4`, `output/review_vi.srt`, `output/kich_ban_review.txt`.
+2. Chạy `python -u pipeline/assemble.py beats final` để xuất `output/review_vi.mp4` (gồm 30s Intro Thoại + 0.55s Chuyển cảnh + Review), `output/review_vi.srt`, `output/kich_ban_review.txt`.
 3. Chạy kiểm tra chất lượng:
    - `python -u pipeline/qa_tts.py 1 15 35 60 85 105 120` (kiểm tra phát âm tên riêng và câu chữ).
    - `python -u pipeline/qa_sheet.py` -> mở xem các ảnh `work/qa/qa_*.jpg`. Nếu beat nào dính thẻ *"未完待续 / 完结"* hoặc lệch cảnh, chỉnh lại cửa sổ thời gian của beat đó rồi chạy lại `python -u pipeline/assemble.py plan beats final` (nhờ cache `.sig`, chỉ những beat sửa mới phải render lại, mất ~15 giây).
@@ -64,37 +77,47 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
 
 ---
 
-## 2. BÍ QUYẾT VĂN PHONG "NGƯỜI KỂ CHUYỆN" (STORYTELLER STYLE GUIDE)
+## 2. QUY TẮC MỞ MÀN 30S THOẠI GỐC (`INTRO_DUB`) & VĂN PHONG "NGƯỜI KỂ CHUYỆN" (`BEATS`)
 
-Đây là linh hồn của kênh review. Mọi kịch bản trong `pipeline/script_beats.py` phải tuân thủ nghiêm ngặt 6 nguyên tắc sau:
+### 2.1. Quy tắc Vàng cho 30 giây Mở màn Lồng tiếng Thoại gốc (`INTRO_DUB` – Cay Nghiệt / Kịch Tính nhưng Không Spoil Kết Quả)
+- **Đồng nhất 1 giọng đọc duy nhất:** Sử dụng chính giọng đọc của kênh cho cả phần 30s thoại mở màn và phần Review để giữ sự đồng nhất xuyên suốt video.
+- **Chọn Đỉnh Điểm Cay Nghiệt / Bỏ Lửng Trước Khi Lật Kèo (Cấm Spoil Kết Quả):**
+  - Chỉ chọn những phân cảnh **cay nghiệt, ức chế nhất** (kẻ bội bạc chà đạp chân tình, tiểu tam ngông cuồng sỉ nhục, đám đông hùa nhau khinh miệt kỷ vật vô giá...) hoặc cảnh đối đầu đang ở thế ngàn cân treo sợi tóc **trước khi nhân vật chính tung đòn kết liễu**.
+  - **CẤM** lấy cảnh kết quả cuối phim (khi kẻ ác đã quỳ gối phá sản, mọi chuyện đã ngã ngũ) làm 30s mở màn vì sẽ làm lộ hết kết cục.
+- **Cắt Nhịp Nén & Khớp Cảnh Gốc 100%:**
+  - Lấy trực tiếp các đoạn hình gốc (`block_id`) nơi nhân vật đang nói và gọt bỏ các đoạn thoại phụ rườm rà ở giữa để gói gọn trong **~28 – 35 giây**.
+  - Nếu đầu cụm cảnh có hành động mạnh (như tiếng tát, tiếng hất đổ bánh kem/đập vỡ đồ), đặt `sfx_lead_sec` để giữ lại âm thanh hiện trường đắt giá đó trước khi câu thoại cất lên.
+- **Tách từng câu ngắt nghỉ thành Voice mới (Cấm chạy 1 câu dài ngoằng):**
+  - Trong `INTRO_DUB`, tuyệt đối không ghép 3–4 câu thoại thành một câu dài 30–40 chữ.
+  - Cứ mỗi chỗ ngắt nghỉ trong `.srt` gốc (mỗi vế/câu ngắn **4 – 15 âm tiết**), phải tách thành **1 dòng độc lập** để TTS tạo **1 file voice mới riêng biệt**, sau đó nghỉ `post_pause_sec` (`0.22s – 0.65s` tùy theo nhịp nhân vật ngừng lấy hơi hoặc nhịp chuyển góc máy) rồi mới phát file voice tiếp theo. Cách này giúp giọng đọc có nhịp ngắt tự nhiên như người thật đang thoại và khớp khẩu hình từng giây.
+- **Hiệu ứng Chuyển cảnh 0.55s & Cầu nối sang Review:**
+  - Kết thúc 30s mở màn ngay ở câu thoại phán quyết / đòn phản kích căng thẳng nhất (Cliffhanger), tự động khựng hình `0.55s` (Freeze Frame + Fade tối dần) rồi chuyển sang giọng **Người Kể Chuyện (ngôi thứ ba)** ở `BEATS[0]` và `BEATS[1]` để dẫn dắt mượt mà về đầu phim.
 
-### 2.1. Tuyệt đối giữ ngôi thứ ba (Người Dẫn Chuyện) – Cấm trích thoại trực tiếp
-- **CẤM:** Dùng dấu hai chấm (`:`), ngoặc kép (`"`), hoặc nhảy sang ngôi thứ nhất/thứ hai (*tôi, mình, cậu, anh, em, con, chúng ta*).
-- **CHUẨN:** Chuyển hóa toàn bộ lời thoại thành **lời kể gián tiếp lột tả tâm lý, động cơ, sự mỉa mai và đòn phản kích**.
-  - *Sai:* `Cố Diễn Chi nói: một chiếc nhẫn thôi mà, cho Hàm Yên đeo thử thì mất miếng thịt nào đâu.`
-  - *Đúng:* `Khi Vân Chiêu lên tiếng đòi lại công bằng, gã đàn ông bội bạc chẳng những không thấy hổ thẹn mà còn quay sang trách cô nhỏ nhen ích kỷ, lạnh lùng buông lời rằng chỉ là một chiếc nhẫn vô tri, cho cô em gái mồ côi đeo thử một chút thì có mất miếng thịt nào đâu.`
+### 2.2. Phần thân Review (`BEATS`): Tuyệt đối giữ ngôi thứ ba (Người Dẫn Chuyện)
+- Từ `BEATS[0]` trở đi (sau 30s mở màn), chuyển hoàn toàn sang **ngôi thứ ba của Người Dẫn Chuyện**:
+  - **CẤM:** Dùng dấu hai chấm (`:`), ngoặc kép (`"`), hoặc nhảy sang ngôi thứ nhất/thứ hai (*tôi, mình, cậu, anh, em, con, chúng ta*).
+  - **CHUẨN:** Chuyển hóa toàn bộ lời thoại thành **lời kể gián tiếp lột tả tâm lý, động cơ, sự mỉa mai và đòn phản kích**.
 
-### 2.2. Giải phẫu 3 lớp cho mỗi Beat (3-Layer Beat Anatomy, 55–68 âm tiết/beat)
-Mỗi beat phải là một câu văn dày dặn, giàu nhịp điệu gồm 3 lớp hòa quyện:
-1. **Lớp 1 – Trạng thái / Bối cảnh mở nhịp (6–12 âm tiết đầu):** Đặt ngay tâm lý hoặc sự đối lập (*"Giữa tiếng xì xào bàn tán đầy phẫn nộ của quan khách,"*, *"Không để gia tộc chịu thêm bất kỳ sự sỉ nhục nào nữa,"*, *"Trớ trêu thay,"*, *"Đứng trước bản sao kê không thể chối cãi,"*).
-2. **Lớp 2 – Hành động cốt lõi dùng động từ mạnh (25–35 âm tiết giữa):** Thay các từ nhạt nhẽo (*nói, làm, đi*) bằng động từ giàu sức nặng (*vạch trần, dội một gáo nước lạnh, phủi sạch quan hệ, tống đạt, rút sạch vốn, lột trần bộ mặt thật, đập tan ảo tưởng*).
-3. **Lớp 3 – Điểm nhấn cảm xúc / Châm biếm cuối câu (15–20 âm tiết cuối):** Khép lại beat bằng một dư âm đắt giá (*"...đẩy kẻ ăn cháo đá bát từ đỉnh cao danh vọng xuống thẳng vực sâu vạn trượng."*, *"...khiến cả hội trường cười chê kẻ tự tay đập vỡ bát cơm vàng."*).
-
-### 2.3. Kỹ thuật Mở màn (Hook 5–6 Beat đầu tiên)
-- **Beat 1–3:** Đưa ngay tình huống ức chế/nghịch lý đỉnh điểm ở đầu phim (ví dụ: giấu thân phận 3 năm bị trao nhẫn đính hôn cho tiểu tam; 3 năm làm dâu bị tặng hàng khuyến mãi).
-- **Beat 4–5:** Hé lộ thân phận thật sự của nhân vật chính (đại tiểu thư nghìn tỷ, nhà thiết kế thiên tài...) và nhá hàng cú vả mặt chấn động để giữ chân khán giả.
-- **Beat 6:** Dùng cụm chuyển cảnh (*"Quay trở lại buổi sáng ngày diễn ra đại lễ..."*) để bắt vào mạch thời gian chính.
+### 2.3. Giải phẫu 3 lớp cho mỗi Beat Review & Nhịp Ngắt Tự Nhiên (50–65 âm tiết/beat)
+- Mỗi beat trong `BEATS` chia thành **4–5 vế ngắn gọn có nhịp thở tự nhiên** ngăn cách bởi **3–4 dấu phẩy `,`** (mỗi vế dài **10–16 âm tiết**), và khi xuất phụ đề `.srt` cũng tự động tách theo từng vế ngắn để không hiện 1 đoạn chữ dài ngoằng trên màn hình:
+  1. **Lớp 1 – Trạng thái / Bối cảnh mở nhịp (8–14 âm tiết đầu + dấu phẩy `,`):** Đặt ngay tâm lý hoặc sự đối lập (*"Giữa tiếng xì xào bàn tán đầy phẫn nộ của quan khách,"*).
+  2. **Lớp 2 – Hành động cốt lõi dùng động từ mạnh (25–35 âm tiết giữa, chia 2–3 vế bằng dấu phẩy `,`):** Thay các từ nhạt nhẽo (*nói, làm, đi*) bằng động từ giàu sức nặng (*vạch trần, dội một gáo nước lạnh, phủi sạch quan hệ, tống đạt, rút sạch vốn, lột trần bộ mặt thật, đập tan ảo tưởng*).
+  3. **Lớp 3 – Điểm nhấn cảm xúc / Châm biếm cuối câu (12–16 âm tiết cuối sau dấu phẩy `,`):** Khép lại beat bằng một dư âm đắt giá (*"...đẩy kẻ ăn cháo đá bát từ đỉnh cao danh vọng xuống thẳng vực sâu vạn trượng."*).
 
 ### 2.4. Kỹ thuật Nén Hội Thoại & Đòn Đối Lập Kép
 - Phim ngắn Trung Quốc thường có các màn cãi vã kéo dài 15–20 phút. Tuyệt đối không dịch lặp lại từng câu cãi nhau mà **gom thành các nấc thang xung đột** (Khiêu khích -> Vạch mặt bằng chứng -> Phản đòn pháp lý -> Sụp đổ).
 - Thường xuyên đặt hai hình ảnh trái ngược vào chung một câu văn (*trong khi nữ chính đứng trên bục nhận giải thưởng trăm tỷ dưới ánh đèn rực rỡ, thì gã chồng cũ lại đang khoác tạp dề bê từng thùng nước trong cửa hàng tiện lợi*).
 
-### 2.5. Quy tắc Âm học cho TTS Tiếng Việt
+### 2.5. Quy tắc Âm học & Cân Bằng Nhịp Ngắt Tự Nhiên / Khóa Tốc Độ TTS
 - Mọi con số phải viết bằng chữ tiếng Việt chuẩn (*ba năm*, *tám mươi triệu tệ*, *bốn mươi phần trăm*, *hai mươi tệ một giờ*).
-- Kiểm soát độ dài mỗi vế câu từ **8 – 22 âm tiết** ngăn cách bằng dấu phẩy `,` để giọng TTS ngắt nghỉ hơi tự nhiên như người thật.
 - Đan cài các cụm từ 4 chữ giàu nhạc tính (*ăn cháo đá bát, được đằng chân lân đằng đầu, kim chi ngọc diệp, trở mặt nhanh hơn lật sách, trốn chui trốn lủi, đầu đường xó chợ, tiền mất tật mang*).
+- **Xử lý âm thanh trong `pipeline/assemble.py` (`stage_audio`) – GIỮ ĐƠN GIẢN:** chỉ cắt khoảng lặng đầu/cuối mỗi file TTS bằng `silenceremove`, ghép các câu ngắn trong `INTRO_DUB` theo đúng khoảng nghỉ tự nhiên `post_pause_sec` (`0.22s – 0.65s`), và ghép các beat trong `BEATS` cách nhau `PAUSE = 0.14s`. **CẤM** đổi tốc độ từng beat (`atempo`), **CẤM** cắt/ghép/nén khoảng nghỉ bên trong câu. Nhịp đọc do chính giọng TTS (`speed=1.08` cố định) quyết định.
 
-### 2.6. Quy tắc Chọn Cửa Sổ Thời Gian (`spec`) Không Bị Làm Chậm (`slow: []`)
-- Ở tốc độ TTS `1.08`, giọng đọc phát âm khoảng `4,2 âm tiết/giây`. Một beat 60 âm tiết cần ~14,5 giây hình ảnh.
-- Luôn đặt cửa sổ thời gian nguồn cho mỗi beat rộng tối thiểu **35 – 70 giây** (ví dụ `"0:03:41-0:04:35"`) để thuật toán chọn được những cú máy đẹp nhất, rải đều theo diễn biến mà không bao giờ phải làm chậm khung hình.
-
+### 2.6. Quy tắc Chọn Cửa Sổ Thời Gian (`spec`) Bám Sát Cảnh 100% & Không Bị Làm Chậm (`slow: []`)
+- **Độ rộng cửa sổ chặt (Chuẩn Tập 15):**
+  - Trung vị độ rộng cửa sổ mỗi beat trong `BEATS` chỉ khoảng **40 – 50 giây** (dao động trong khoảng **28 – 65 giây**, **TUYỆT ĐỐI KHÔNG vượt quá 85–90 giây**). Cấm đặt cửa sổ rộng 2–4 phút vì sẽ làm thuật toán lấy hình rải sang các cảnh chưa/đã xảy ra, gây lệch lời với hình.
+  - Từ Beat 3 trở đi, hai beat liên tiếp **không được chồng lấn (`overlap`) quá 8–10 giây**.
+- **Neo mốc thời gian trực tiếp vào hành động trên hình (`work/sheets/*.jpg` & `work/srt_condensed.txt`):**
+  - Trước khi viết, bắt buộc kiểm tra 3–4 câu thoại đặc trưng ở đầu, giữa và cuối phim để chắc chắn mốc thời gian SRT không bị trôi so với hình.
+  - Mỗi beat kể hành động nào (ví dụ: *tát lật mặt*, *ném xấp ảnh*, *đập vỡ lọ thuốc*, *cán bộ văn vật ập vào*) thì cửa sổ `h:mm:ss-h:mm:ss` phải đóng khung **đúng khoảnh khắc hành động đó diễn ra trên màn hình**.
+  - Nếu 1 beat ghép 2 hành động ở hai thời điểm cách nhau hoặc có cảnh hồi tưởng xen giữa, bắt buộc tách thành **2 cửa sổ con cách nhau bằng dấu phẩy** (ví dụ `"0:38:20-0:38:43,0:38:45-0:39:25"`).

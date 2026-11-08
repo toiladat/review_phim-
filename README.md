@@ -238,37 +238,52 @@ python pipeline\contact_sheets.py
 
 Lược bỏ: các đoạn tóm tắt lặp lại đầu mỗi tập, thoại phụ (nhân viên lễ tân, quán cà phê nói lặp), chi tiết vàng cưới "3 món / 5 món"…
 
-**6.2. Định dạng file `script_beats.py`**
+**6.2. Định dạng file `script_beats.py` (Gồm `INTRO_DUB` 30s Mở màn Thoại gốc + `BEATS` Review)**
 
 ```python
-TITLE = "BẠN THÂN MƯỢN CHỒNG SẮP CƯỚI"
+TITLE = "CHÀNG NHÂN VIÊN QUÈN THỰC CHẤT LÀ TỔNG TÀI TRĂM TỶ"
 
+# Phần 1: ~30 giây Mở màn Lồng tiếng Thoại gốc Cao trào (Tách từng câu ngắn có ngắt nghỉ tự nhiên)
+# Mỗi dòng = 1 file voice độc lập (4–15 âm tiết, dài 0.8–2.8s), tuyệt đối KHÔNG gộp thành 1 câu dài ngoằng!
+# Định dạng: (block_id, "h:mm:ss.s", sfx_lead_sec, post_pause_sec, "Câu thoại ngắn")
+INTRO_DUB = [
+    (1, "1:47:24.2", 0.00, 0.22, "Nhìn thấy chưa,"),
+    (1, "1:47:24.2", 0.00, 0.25, "đó là bố ruột của tôi,"),
+    (1, "1:47:24.2", 0.00, 0.65, "giám khảo chính hôm nay đích thân đến chống lưng cho tôi đấy."),
+    (1, "1:47:24.2", 0.00, 0.38, "Lục Trầm, hôm nay mày tiêu đời chắc rồi."),
+    (1, "1:47:24.2", 0.00, 0.25, "Tao sẽ cho mày thua không còn mảnh vải che thân."),
+    (2, "1:48:00.2", 1.65, 0.42, "Đồ nghiệt tử không biết trời cao đất dày!"),
+    (2, "1:48:00.2", 0.00, 0.30, "Mày câm miệng ngay cho tao!"),
+    ...
+]
+
+# Phần 2: Các Beat Review theo Phong cách Người Kể Chuyện (Ngôi thứ ba)
 BEATS = [
-    # (cửa sổ thời gian nguồn, lời bình)
-    ("0:05-0:16", "Bảy ngày trước đám cưới, cô bạn thân nhất mở lời mượn luôn vị hôn phu của cô..."),
-    ("23:31-23:37,24:01-24:20", "Hai năm sau, khi hắn quay về tìm cô..."),   # nhiều cửa sổ cách nhau dấu phẩy
+    # Beat 1: Nối tiếp ngay sau điểm cắt 30s mở màn (sau 0.55s Freeze Frame chuyển cảnh)
+    ("1:49:29-1:49:44", "Chỉ bằng một lời phán quyết lạnh lùng tước đoạt hợp đồng sống còn ngay trên sóng truyền hình..."),
+    # Beat 2: Cầu nối đưa mạch truyện quay ngược về đầu phim
+    ("0:00:00-0:01:36", "Để hiểu vì sao vị thái tử gia nắm giữ đế chế Hoàn Vũ Lục thị hàng trăm tỷ lại ẩn danh..."),
     ...
 ]
 ```
 
-- **Cửa sổ thời gian** dạng `m:ss-m:ss` (phút có thể > 60, ví dụ `63:09-63:15`), nhiều cửa sổ cách nhau bằng dấu phẩy. Đây là **khoảng phim gốc minh họa cho câu đó**, không cần chính xác tới từng giây – thuật toán sẽ tự chọn cú máy bên trong.
-- Lời bình viết **số bằng chữ** ("ba trăm nghìn tệ", "hai năm") để TTS đọc tự nhiên.
-- 112 beat, 3871 âm tiết → ước tính 14 phút ở tốc độ ~4,5 âm tiết/giây (thực tế ra 14:14).
+- **Quy tắc `INTRO_DUB` (~30s Mở màn Thoại gốc):**
+  - Chọn phân cảnh đấu khẩu / vạch mặt gay cấn nhất phim, cắt bỏ các đoạn thoại phụ rườm rà ở giữa để cô đọng trong `3–5` cụm cảnh gốc liền mạch (`block_id`), tổng thời lượng **28 – 33 giây**.
+  - **Tách từng câu ngắt nghỉ thành Voice mới:** Chỗ nào trong `.srt` gốc nhân vật ngắt nghỉ hoặc chuyển câu thì tách thành 1 phần tử riêng trong `INTRO_DUB` (12–16 câu thoại ngắn cho 30s mở màn) để app TTS đọc thành **file voice mới riêng biệt**, chèn khoảng nghỉ `post_pause_sec` (`0.22s – 0.65s`) khớp với khẩu hình và nhịp chuyển góc máy.
+  - Tự động kết thúc phần mở màn bằng **0.55 giây khựng hình chuyển cảnh (Freeze Frame + Fade tối dần)** trước khi vào `BEATS`.
+- **Quy tắc `BEATS` (Phần thân Review):**
+  - **Cửa sổ thời gian** dạng `h:mm:ss-h:mm:ss`, nhiều cửa sổ cách nhau bằng dấu phẩy.
+  - Lời bình giữ 100% **ngôi thứ ba (Người Dẫn Chuyện)**, viết **số bằng chữ** ("ba trăm nghìn tệ", "hai năm") để TTS đọc tự nhiên.
 
 **6.3. Cấu trúc kịch bản**
 
-| Phần | Beat | Nội dung | Thời lượng |
+| Phần | Cấu trúc | Nội dung | Thời lượng |
 |---|---|---|---|
-| Mở màn (hook) | 1–6 | Nêu xung đột phi lý + hé lộ cú lật "bạn thân đã chết từ lâu" + câu hỏi "vậy kẻ đó là ai?" | ~35 giây |
-| Hồi 1 | 7–24 | Sinh nhật, cắt lỗ, vòi tiền | |
-| Hồi 2 | 25–34 | Đính hôn + tai nạn + máy bay | |
-| Hồi 3 | 35–46 | Ở nước ngoài, trở về, tìm kiếm | |
-| Hồi 4 | 47–65 | Đối chất ở trung tâm thương mại | |
-| Hồi 5 | 66–74 | Cú lật song sinh ở viện dưỡng lão | |
-| Hồi 6 | 75–81 | Nhật ký Lộ Lộ thật, quyết định kiện | |
-| Hồi 7 | 82–91 | Đối chất lần 2, Hạ Xuyên biết sự thật | |
-| Hồi 8 | 92–98 | Bờ biển, hai cái chết | |
-| Hồi 9 + kết | 99–112 | Đòi nợ, viếng mộ, độc thoại, kêu gọi bình luận | |
+| Mở màn Thoại gốc (`INTRO_DUB`) | 12–16 câu thoại ngắn | Cắt cảnh cao trào đắt giá nhất phim, lồng tiếng Việt trực tiếp từng câu ngắn có ngắt nghỉ tự nhiên, dừng ở Cliffhanger + `0.55s` Freeze Frame | ~30–33 giây |
+| Cầu nối vào Review | Beat 1–2 | Nêu hậu quả tức thì của màn cao trào + lật thân phận nhân vật chính + dẫn ngược về đầu phim | ~25 giây |
+| Hồi 1 | Beat 3–24 | Khởi đầu xung đột, biến cố mở màn | |
+| Hồi 2–8 | Beat 25–105 | Các nấc thang xung đột, phản kích và lật mở sự thật | |
+| Hồi cuối + Kết | Beat 106–120 | Cao trào báo ứng, đại đoàn viên và thông điệp khép lại | |
 
 ### Bước 7 – Lồng tiếng qua MCP `dgt-auto-tts`
 
@@ -276,15 +291,14 @@ Luồng gọi MCP:
 
 ```
 get_status            → kiểm tra đăng nhập, giọng đang chọn
-list_voices           → giọng "viet_review_dt6Rssa4" (Vietnamese)
-set_tts_settings      → change_speed=true, speed=1.1   (đã trả về 1.0 sau khi xong)
-load_input            → work/tts/narration.srt   (112 entry)
+list_voices           → giọng "viet_rv_dt6dOAIc" / "viet_review_dt6Rssa4" (Vietnamese)
+set_tts_settings      → change_speed=true, speed=1.08  (trả về 1.0 sau khi xong)
+load_input            → work/tts/narration.srt   (gồm M câu ngắn INTRO_DUB + N câu BEATS)
 start_tts             → merge_short_lines=false
-get_status / get_progress → chờ done = 112 (mất ~4 phút)
+get_status / get_progress → chờ done = M + N
 ```
 
-- File `narration.srt` được tạo từ `BEATS`: mỗi beat là **một entry SRT riêng**, mốc thời gian giả cách nhau 30 giây (chỉ để app tách dòng).
-- App tạo `work/tts/narration/1.mp3 … 112.mp3` – **số thứ tự file = số thứ tự beat**.
+- File `narration.srt` được tạo từ `INTRO_DUB` nối tiếp `BEATS`: mỗi câu thoại ngắn trong `INTRO_DUB` và mỗi beat trong `BEATS` là **một entry SRT riêng** để app tạo một file voice mới độc lập cho từng câu (`1.mp3 … (M+N).mp3`).
 
 > [!WARNING]
 > **Không nạp file `.txt`**: app tự gộp nhiều dòng thành một khối (112 dòng → 42 khối) làm mất ánh xạ 1 beat = 1 file. Phải dùng `.srt` để giữ đúng 112 file.
@@ -311,8 +325,8 @@ python -u assemble.py plan beats final      # chạy từng giai đoạn tùy ý
 
 | Giai đoạn | Làm gì | Đầu ra |
 |---|---|---|
-| `audio` | Đọc `N.mp3`, **cắt khoảng lặng đầu/cuối** (`silenceremove` ngưỡng −48 dB, làm 2 lần với `areverse`), chuyển sang wav 48 kHz mono | `work/aud/NNN.wav`, `beats_audio.json` |
-| `plan` | Với mỗi beat: thời lượng = giọng đọc + 0,14 giây nghỉ, làm tròn theo số khung hình; chọn các đoạn hình trong cửa sổ nguồn (xem [mục 6](#6-thuật-toán-ghép-hình-khớp-lời)) | `work/plan.json` |
+| `audio` | Đọc `N.mp3`, **cắt khoảng lặng đầu/cuối + thu gọn mượt mọi khoảng nghỉ dài `> 140ms` bên trong câu (`_smooth_compress_pauses`) + khóa đồng nhất tốc độ nhả chữ (`TARGET_SPEECH_RATE = 5.22` âm tiết/giây)**, chuyển sang wav 48 kHz mono | `work/aud/NNN.wav`, `beats_audio.json` |
+| `plan` | Với mỗi beat: thời lượng = giọng đọc + 0,09 giây nghỉ, làm tròn theo số khung hình; chọn các đoạn hình trong cửa sổ nguồn (xem [mục 6](#6-thuật-toán-ghép-hình-khớp-lời)) | `work/plan.json` |
 | `beats` | Render mỗi beat thành 1 file mp4 (3 luồng song song, NVENC): cắt các đoạn, phóng 1,05×, ghép, làm mờ dải phụ đề Trung, giữ âm gốc 13%, khóa đúng số khung hình | `work/beats/NNN.mp4` |
 | `final` | Ghép 112 beat (`concat`, không mã hóa lại) → dựng track giọng đọc khớp từng mẫu âm thanh → tạo phụ đề ASS → in phụ đề + fade đầu/cuối + trộn âm + chuẩn hóa âm lượng | `output/review_vi.mp4` |
 

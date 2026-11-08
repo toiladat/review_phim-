@@ -8,12 +8,14 @@ Stages (cached in work/):
   final  : concat beats, build pure Vietnamese narration track (no original audio, no burned-in subs/title),
            mux & export output/review_vi.mp4 + output/review_vi.srt + output/kich_ban_review.txt
 """
-import glob, json, math, os, re, subprocess, sys, wave
+import glob, json, math, os, re, shutil, subprocess, sys, wave
 from concurrent.futures import ThreadPoolExecutor
 import cv2, numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
+import script_beats as _sb
 from script_beats import BEATS, TITLE
+INTRO_DUB = getattr(_sb, "INTRO_DUB", [])
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,10 +29,26 @@ def _find_input(ext, default_name):
     return cands[0] if cands else os.path.join(ROOT, default_name)
 
 
+def _find_ffmpeg():
+    ff_win = os.path.join(ROOT, "tools", "ffmpeg.exe")
+    ff_mac = os.path.join(ROOT, "tools", "ffmpeg")
+    if os.name == "nt" and os.path.exists(ff_win):
+        return ff_win
+    if os.path.exists(ff_mac):
+        return ff_mac
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+
 SRC = _find_input("mp4", "1.mp4")
 SRT_PATH = _find_input("srt", "1.srt")
 WORK = os.path.join(ROOT, "work")
-FF = os.path.join(ROOT, "tools", "ffmpeg.exe")
+FF = _find_ffmpeg()
+IS_MAC = sys.platform == "darwin"
+VCODEC_BEAT = (
+    ["-c:v", "h264_videotoolbox", "-q:v", "68", "-g", "60", "-pix_fmt", "yuv420p"]
+    if IS_MAC
+    else ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0", "-g", "60", "-pix_fmt", "yuv420p"]
+)
 TTS_DIR = os.path.join(WORK, "tts", "narration")
 AUD = os.path.join(WORK, "aud")
 SEG = os.path.join(WORK, "beats")
@@ -89,7 +107,7 @@ def run(cmd, quiet=True):
 
 
 def ts(s):
-    parts = [int(x) for x in s.strip().split(":")]
+    parts = [float(x) for x in s.strip().split(":")]
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
     return parts[0] * 60 + parts[1]
@@ -108,11 +126,40 @@ def wav_dur(p):
         return w.getnframes() / w.getframerate()
 
 
+def stage_make_srt():
+    """Export INTRO_DUB (short voice lines) + BEATS (review beats) to work/tts/narration.srt."""
+    os.makedirs(os.path.join(WORK, "tts"), exist_ok=True)
+    srt_p = os.path.join(WORK, "tts", "narration.srt")
+    all_texts = [x[4] for x in INTRO_DUB] + [t for _, t in BEATS]
+    fmt = lambda s: f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d},000"
+    blocks = [f"{i + 1}\n{fmt(i * 30)} --> {fmt(i * 30 + 25)}\n{txt}\n" for i, txt in enumerate(all_texts)]
+    open(srt_p, "w", encoding="utf-8").write("\n".join(blocks))
+    print(f"make_srt: {len(INTRO_DUB)} intro lines + {len(BEATS)} beats = {len(all_texts)} total lines -> {srt_p}")
+    return srt_p
+
+
 # ---------------------------------------------------------------- audio
 def stage_audio():
+    """Plain & natural: only trim head/tail silence of each TTS clip. No per-beat tempo change,
+    no internal pause splicing, so the narrator's own rhythm stays untouched and consistent."""
+    m_intro = len(INTRO_DUB)
+    if m_intro > 0:
+        intro_info = []
+        for idx in range(m_intro):
+            src = os.path.join(TTS_DIR, f"{idx + 1}.mp3")
+            dst = os.path.join(AUD, f"intro_{idx + 1:03d}.wav")
+            if not os.path.exists(src):
+                raise SystemExit(f"missing intro TTS {src}")
+            if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
+                af = ("silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.02,"
+                      "areverse,silenceremove=start_periods=1:start_threshold=-42dB:start_silence=0.03,areverse")
+                run([FF, "-y", "-i", src, "-af", af, "-ar", "48000", "-ac", "1", dst])
+            intro_info.append({"idx": idx, "wav": dst, "dur": round(wav_dur(dst), 3)})
+        json.dump(intro_info, open(os.path.join(WORK, "intro_audio.json"), "w"), indent=1)
+
     info = []
     for i in range(len(BEATS)):
-        src = os.path.join(TTS_DIR, f"{i + 1}.mp3")
+        src = os.path.join(TTS_DIR, f"{m_intro + i + 1}.mp3")
         dst = os.path.join(AUD, f"{i + 1:03d}.wav")
         if not os.path.exists(src):
             raise SystemExit(f"missing TTS {src}")
@@ -123,7 +170,7 @@ def stage_audio():
         info.append({"i": i, "wav": dst, "dur": round(wav_dur(dst), 3)})
     json.dump(info, open(os.path.join(WORK, "beats_audio.json"), "w"), indent=1)
     tot = sum(x["dur"] for x in info) + PAUSE * len(info)
-    print(f"audio: {len(info)} beats, total {tot / 60:.2f} min")
+    print(f"audio: {m_intro} intro lines + {len(info)} beats, review {tot / 60:.2f} min")
     return info
 
 
@@ -473,8 +520,7 @@ def render_beat(p, force=False):
 
     cmd += ["-filter_complex", ";".join(fc), "-map", "[vo]", "-an",
             "-frames:v", str(p["frames"]), "-t", f"{p['dur']:.4f}", "-r", f"{FPS_NUM}/{FPS_DEN}",
-            "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "19", "-b:v", "0", "-g", "60",
-            "-pix_fmt", "yuv420p", out]
+            *VCODEC_BEAT, out]
     run(cmd)
     open(sigf, "w").write(sig)
     return out
@@ -544,7 +590,111 @@ def srt_time(t):
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_ass_and_srt(plan, ass_path, srt_path, script_path):
+def build_intro_assets():
+    """Render INTRO_DUB (~30s Cold Open with short paused voice clips + 0.55s Freeze/Fade transition)."""
+    if not INTRO_DUB:
+        return [], b"", [], 0.0
+    intro_aud_p = os.path.join(WORK, "intro_audio.json")
+    if os.path.exists(intro_aud_p):
+        intro_info = json.load(open(intro_aud_p))
+    else:
+        intro_info = [{"idx": i, "wav": os.path.join(AUD, f"intro_{i + 1:03d}.wav"),
+                       "dur": round(wav_dur(os.path.join(AUD, f"intro_{i + 1:03d}.wav")), 3)}
+                      for i in range(len(INTRO_DUB))]
+
+    # Group by block_id preserving order
+    blocks = []
+    for idx, (blk_id, src_ts, sfx_lead, post_pause, txt) in enumerate(INTRO_DUB):
+        if not blocks or blocks[-1]["blk_id"] != blk_id:
+            blocks.append({"blk_id": blk_id, "src_s": ts(src_ts), "items": []})
+        blocks[-1]["items"].append((idx, float(sfx_lead), float(post_pause), txt))
+
+    sr = 48000
+    v_files = []
+    audio_chunks = []
+    srt_entries = []
+    t_cur = 0.0
+    sw, sh = int(round(W * ZOOM / 2) * 2), int(round(H * ZOOM / 2) * 2)
+    cx, cy = (sw - W) // 2, (sh - H) // 2
+    vf_base = f"fps={FPS_NUM}/{FPS_DEN},scale={sw}:{sh}:flags=lanczos,crop={W}:{H}:{cx}:{cy},setsar=1"
+
+    last_src_end = 0.0
+    for b_i, blk in enumerate(blocks):
+        t_blk_start = t_cur
+        for idx, sfx_lead, post_pause, txt in blk["items"]:
+            if sfx_lead > 0:
+                sfx_wav = os.path.join(AUD, f"intro_sfx_{b_i}_{idx}.wav")
+                run([FF, "-y", "-hide_banner", "-loglevel", "error",
+                     "-ss", f"{blk['src_s']:.3f}", "-t", f"{sfx_lead:.3f}", "-i", SRC,
+                     "-af", f"volume=0.70,afade=t=out:st={max(0.0, sfx_lead - 0.35):.2f}:d=0.35",
+                     "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", sfx_wav])
+                with wave.open(sfx_wav, "rb") as ws:
+                    s_raw = ws.readframes(ws.getnframes())
+                need_s = round(sfx_lead * sr)
+                s_raw = s_raw[:need_s * 2] + b"\x00\x00" * max(0, need_s - len(s_raw) // 2)
+                audio_chunks.append(s_raw)
+                t_cur += sfx_lead
+
+            w_item = intro_info[idx]
+            d_v = w_item["dur"]
+            with wave.open(w_item["wav"], "rb") as wi:
+                v_raw = wi.readframes(wi.getnframes())
+            need_v = round(d_v * sr)
+            v_raw = v_raw[:need_v * 2] + b"\x00\x00" * max(0, need_v - len(v_raw) // 2)
+            audio_chunks.append(v_raw)
+            srt_entries.append((t_cur, t_cur + d_v, txt))
+            t_cur += d_v
+
+            if post_pause > 0:
+                audio_chunks.append(b"\x00\x00" * round(post_pause * sr))
+                t_cur += post_pause
+
+        dur_blk = t_cur - t_blk_start
+        n_frames = max(1, round(dur_blk * FPS))
+        dur_exact = n_frames / FPS
+        # Adjust audio chunk padding to exact frame-aligned duration
+        cur_samples = sum(len(c) // 2 for c in audio_chunks)
+        target_samples = round((t_blk_start + dur_exact) * sr)
+        diff = target_samples - cur_samples
+        if diff > 0:
+            audio_chunks.append(b"\x00\x00" * diff)
+        elif diff < 0 and audio_chunks:
+            audio_chunks[-1] = audio_chunks[-1][:max(0, len(audio_chunks[-1]) + diff * 2)]
+        t_cur = t_blk_start + dur_exact
+
+        vp = os.path.join(SEG, f"intro_blk_{b_i + 1:02d}.mp4")
+        run([FF, "-y", "-hide_banner", "-loglevel", "error",
+             "-ss", f"{blk['src_s']:.3f}", "-t", f"{dur_exact + 0.15:.3f}", "-i", SRC,
+             "-vf", f"{vf_base},tpad=stop_mode=clone:stop_duration=1.0", "-frames:v", str(n_frames), "-an",
+             *VCODEC_BEAT, vp])
+        v_files.append(vp)
+        last_src_end = blk["src_s"] + dur_exact
+
+    # 0.55s Freeze Frame + Fade-out transition
+    d_tr = 0.55
+    n_tr = max(1, round(d_tr * FPS))
+    d_tr_exact = n_tr / FPS
+    frame_png = os.path.join(SEG, "intro_freeze.png")
+    vf_img = f"scale={sw}:{sh}:flags=lanczos,crop={W}:{H}:{cx}:{cy},setsar=1"
+    run([FF, "-y", "-hide_banner", "-loglevel", "error",
+         "-ss", f"{max(0.0, last_src_end - 0.08):.3f}", "-i", SRC, "-frames:v", "1", "-vf", vf_img, frame_png])
+    vp_tr = os.path.join(SEG, "intro_freeze.mp4")
+    vf_loop = f"fps={FPS_NUM}/{FPS_DEN},eq=brightness=0.06:contrast=1.08,fade=t=out:st={max(0.0, d_tr_exact - 0.40):.3f}:d=0.40,format=yuv420p"
+    run([FF, "-y", "-hide_banner", "-loglevel", "error",
+         "-loop", "1", "-t", f"{d_tr_exact + 0.1:.3f}", "-i", frame_png,
+         "-vf", vf_loop, "-frames:v", str(n_tr), "-an",
+         *VCODEC_BEAT, vp_tr])
+    v_files.append(vp_tr)
+    t_cur += d_tr_exact
+    target_tot_samples = round(t_cur * sr)
+    cur_samples = sum(len(c) // 2 for c in audio_chunks)
+    if target_tot_samples > cur_samples:
+        audio_chunks.append(b"\x00\x00" * (target_tot_samples - cur_samples))
+
+    return v_files, b"".join(audio_chunks), srt_entries, t_cur
+
+
+def build_ass_and_srt(plan, ass_path, srt_path, script_path, intro_srt=None, intro_offset=0.0):
     sub_fs = 48 if IS_LANDSCAPE else 64
     head = f"""[Script Info]
 ScriptType: v4.00+
@@ -563,7 +713,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ev = []
     srt_blocks = []
     idx = 1
-    t0 = 0.0
+    for sa, sb, txt in (intro_srt or []):
+        ev.append(f"Dialogue: 0,{ass_time(sa)},{ass_time(sb)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(txt)}")
+        srt_blocks.append(f"{idx}\n{srt_time(sa)} --> {srt_time(sb)}\n{txt}\n")
+        idx += 1
+
+    t0 = intro_offset
     for p in plan:
         chunks = split_chunks(p["text"])
         weights = [max(len(c.split()), 1) + 0.6 * len(re.findall(r"[,.:;?!]", c)) for c in chunks]
@@ -578,15 +733,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         t0 += p["dur"]
     open(ass_path, "w", encoding="utf-8-sig").write(head + "\n".join(ev) + "\n")
     open(srt_path, "w", encoding="utf-8").write("\n".join(srt_blocks))
-    open(script_path, "w", encoding="utf-8").write("\n\n".join(f"[{p['i'] + 1:03d}] {p['text']}" for p in plan) + "\n")
+    intro_txt = "\n".join(f"[INTRO {i + 1:02d}] {x[4]}" for i, x in enumerate(INTRO_DUB))
+    beats_txt = "\n\n".join(f"[{p['i'] + 1:03d}] {p['text']}" for p in plan)
+    open(script_path, "w", encoding="utf-8").write((intro_txt + "\n\n" if intro_txt else "") + beats_txt + "\n")
     return t0
 
 
 # ---------------------------------------------------------------- final
 def stage_final(plan, name="review_vi.mp4"):
+    intro_v, intro_pcm, intro_srt, intro_dur = build_intro_assets()
+
     # 1) concat beat videos
     lst = os.path.join(WORK, "beats_list.txt")
     with open(lst, "w", encoding="utf-8") as f:
+        for vp in intro_v:
+            f.write(f"file '{vp.replace(chr(92), '/')}'\n")
         for p in plan:
             bp = os.path.join(SEG, "%03d.mp4" % (p["i"] + 1)).replace("\\", "/")
             f.write(f"file '{bp}'\n")
@@ -597,6 +758,8 @@ def stage_final(plan, name="review_vi.mp4"):
     nar = os.path.join(WORK, "narration_full.wav")
     with wave.open(nar, "wb") as wo:
         wo.setnchannels(1); wo.setsampwidth(2); wo.setframerate(48000)
+        if intro_pcm:
+            wo.writeframes(intro_pcm)
         t_samples = 0
         t_exact = 0.0
         for p in plan:
@@ -613,19 +776,18 @@ def stage_final(plan, name="review_vi.mp4"):
     ass = os.path.join(WORK, "subs_vi.ass")
     srt_out = os.path.join(OUT, "review_vi.srt")
     txt_out = os.path.join(OUT, "kich_ban_review.txt")
-    total = build_ass_and_srt(plan, ass, srt_out, txt_out)
+    total = build_ass_and_srt(plan, ass, srt_out, txt_out, intro_srt=intro_srt, intro_offset=intro_dur)
     out = os.path.join(OUT, name)
     af = (f"[1:a]aformat=channel_layouts=stereo,volume=1.0,"
           f"acompressor=threshold=-18dB:ratio=3:attack=5:release=120,"
           f"loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=out:st={total - 1.2:.2f}:d=1.2[a]")
     if BURN_SUBS:
         ass_ff = ass.replace("\\", "/").replace(":", "\\:")
-        fonts_ff = "C\\:/Windows/Fonts"
+        fonts_ff = "/System/Library/Fonts/Supplemental" if IS_MAC else "C\\:/Windows/Fonts"
         vf = f"subtitles='{ass_ff}':fontsdir='{fonts_ff}'"
         run([FF, "-y", "-hide_banner", "-loglevel", "error", "-i", joined, "-i", nar, "-vf", vf,
              "-filter_complex", af, "-map", "0:v", "-map", "[a]",
-             "-c:v", "h264_nvenc", "-preset", "p6", "-rc", "vbr", "-cq", "20", "-b:v", "0", "-maxrate", "16M", "-bufsize", "32M",
-             "-profile:v", "high", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+             *VCODEC_BEAT, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
              "-movflags", "+faststart", out])
     else:
         # Pure video copy (no burned-in Vietnamese subs or title) + pure Vietnamese narration audio
@@ -639,6 +801,10 @@ def stage_final(plan, name="review_vi.mp4"):
 
 if __name__ == "__main__":
     stages = sys.argv[1:] or ["audio", "plan", "beats", "final"]
+    if "make_srt" in stages:
+        stage_make_srt()
+        if len(stages) == 1:
+            raise SystemExit(0)
     info = stage_audio() if "audio" in stages else json.load(open(os.path.join(WORK, "beats_audio.json")))
     plan = stage_plan(info) if "plan" in stages else json.load(open(os.path.join(WORK, "plan.json"), encoding="utf-8"))
     if "beats" in stages:

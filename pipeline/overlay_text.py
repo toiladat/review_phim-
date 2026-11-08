@@ -41,15 +41,31 @@ if len(sys.argv) > 1:  # test mode: times
     for t in sys.argv[1:]:
         print(t, score(at(float(t))))
     raise SystemExit
+cap.release()
+
+from concurrent.futures import ThreadPoolExecutor
+
+def _worker(chunk):
+    idx_start, sub_shots = chunk
+    c = cv2.VideoCapture(SRC)
+    out = []
+    for k, (a, b) in enumerate(sub_shots):
+        sc = []
+        for f in (0.25, 0.75):
+            c.set(cv2.CAP_PROP_POS_MSEC, (a + (b - a) * f) * 1000)
+            ok, img = c.read()
+            if ok and img is not None:
+                sc.append(score(img))
+        out.append(sc)
+    c.release()
+    return idx_start, out
+
+n_workers = min(8, max(1, len(shots) // 100))
+step = (len(shots) + n_workers - 1) // n_workers
+chunks = [(i, shots[i:i + step]) for i in range(0, len(shots), step)]
 flags = []
-for k, (a, b) in enumerate(shots):
-    sc = []
-    for f in (0.25, 0.75):
-        img = at(a + (b - a) * f)
-        if img is not None:
-            sc.append(score(img))
-    flags.append(sc)
-    if k % 200 == 0:
-        print(k, flush=True)
+with ThreadPoolExecutor(n_workers) as ex:
+    for _, part in sorted(ex.map(_worker, chunks), key=lambda x: x[0]):
+        flags.extend(part)
 json.dump(flags, open(os.path.join(WORK, "shot_flags.json"), "w"))
-print("done")
+print("done", len(flags))

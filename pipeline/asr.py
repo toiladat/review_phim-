@@ -2,15 +2,19 @@
 or transcribes full video if --full is passed or SRT is missing).
 Output: work/asr.json and work/asr_gaps.txt
 """
-import glob, json, os, subprocess, sys, time
+import glob, json, os, shutil, subprocess, sys, time
 import cv2
-import torch  # noqa: F401  (loads CUDA libs such as cublas64_12.dll)
-os.add_dll_directory(os.path.join(os.path.dirname(torch.__file__), "lib"))
-os.environ["PATH"] = os.path.join(os.path.dirname(torch.__file__), "lib") + os.pathsep + os.environ["PATH"]
+import torch  # noqa: F401  (loads CUDA libs such as cublas64_12.dll on Windows)
+_torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+if hasattr(os, "add_dll_directory") and os.path.isdir(_torch_lib):
+    os.add_dll_directory(_torch_lib)
+os.environ["PATH"] = _torch_lib + os.pathsep + os.environ["PATH"]
 from faster_whisper import WhisperModel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FF = os.path.join(ROOT, "tools", "ffmpeg.exe")
+_ff_win = os.path.join(ROOT, "tools", "ffmpeg.exe")
+_ff_mac = os.path.join(ROOT, "tools", "ffmpeg")
+FF = _ff_win if (os.name == "nt" and os.path.exists(_ff_win)) else (_ff_mac if os.path.exists(_ff_mac) else (shutil.which("ffmpeg") or "ffmpeg"))
 WORK = os.path.join(ROOT, "work")
 os.makedirs(WORK, exist_ok=True)
 
@@ -61,7 +65,8 @@ if not force_full and os.path.exists(SRT_JSON):
         print("No SRT gaps > 40s found; skipping Whisper ASR.", round(time.time() - t0, 2))
         sys.exit(0)
 
-model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+_use_cuda = torch.cuda.is_available()
+model = WhisperModel("large-v3", device="cuda" if _use_cuda else "cpu", compute_type="float16" if _use_cuda else "int8")
 
 res = []
 if gaps:

@@ -49,6 +49,10 @@ def load_vn_font(size):
         r"C:\Windows\Fonts\arialbd.ttf",
         r"C:\Windows\Fonts\tahomabd.ttf",
         r"C:\Windows\Fonts\segoeuib.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Tahoma Bold.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
     ]:
         if os.path.exists(fp):
             return ImageFont.truetype(fp, size)
