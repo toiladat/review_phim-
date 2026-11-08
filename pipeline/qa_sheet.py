@@ -13,17 +13,31 @@ if vw >= vh:
 else:
     TW, TH, COLS, ROWS = 180, 320, 8, 4
 
-t = 0
+t = 0.0
+intro_meta_p = os.path.join(ROOT, "work", "intro_meta.json")
+if os.path.exists(intro_meta_p):
+    t = float(json.load(open(intro_meta_p, encoding="utf-8")).get("intro_dur", 0.0))
+elif plan and "start_sec" in plan[0]:
+    t = float(plan[0]["start_sec"])
+else:
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+        from assemble import compute_intro_dur
+        t = float(compute_intro_dur())
+    except Exception:
+        t = 0.0
+
 frames = []
 for p in plan:
-    mid = t + p["dur"] * 0.5
+    t_start = float(p.get("start_sec", t))
+    mid = t_start + p["dur"] * 0.5
     cap.set(cv2.CAP_PROP_POS_MSEC, mid * 1000)
     ok, img = cap.read()
     th = cv2.resize(img, (TW, TH)) if ok else np.zeros((TH, TW, 3), np.uint8)
     cv2.rectangle(th, (0, 0), (60, 26), (0, 0, 0), -1)
     cv2.putText(th, str(p["i"] + 1), (3, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     frames.append(th)
-    t += p["dur"]
+    t = t_start + p["dur"]
 os.makedirs(os.path.join(ROOT, "work", "qa"), exist_ok=True)
 per = COLS * ROWS
 for s in range(0, len(frames), per):

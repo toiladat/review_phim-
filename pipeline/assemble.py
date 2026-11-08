@@ -427,6 +427,35 @@ def detect_all_seg_boxes(plan):
         plan[bi]["segs"][sk] = s
 
 
+def compute_intro_dur():
+    """Compute exact frame-aligned duration of INTRO_DUB + 0.55s freeze transition."""
+    if not INTRO_DUB:
+        return 0.0
+    intro_aud_p = os.path.join(WORK, "intro_audio.json")
+    if os.path.exists(intro_aud_p):
+        intro_info = json.load(open(intro_aud_p))
+    else:
+        intro_info = []
+        for i in range(len(INTRO_DUB)):
+            wp = os.path.join(AUD, f"intro_{i + 1:03d}.wav")
+            d = round(wav_dur(wp), 3) if os.path.exists(wp) else 0.0
+            intro_info.append({"idx": i, "wav": wp, "dur": d})
+    blocks = []
+    for idx, (blk_id, src_ts, sfx_lead, post_pause, txt) in enumerate(INTRO_DUB):
+        if not blocks or blocks[-1]["blk_id"] != blk_id:
+            blocks.append({"blk_id": blk_id, "items": []})
+        blocks[-1]["items"].append((idx, float(sfx_lead), float(post_pause)))
+    t_cur = 0.0
+    for blk in blocks:
+        dur_blk = sum(sfx + (intro_info[idx]["dur"] if idx < len(intro_info) else 0.0) + pause
+                      for idx, sfx, pause in blk["items"])
+        n_frames = max(1, round(dur_blk * FPS))
+        t_cur += n_frames / FPS
+    n_tr = max(1, round(0.55 * FPS))
+    t_cur += n_tr / FPS
+    return round(t_cur, 4)
+
+
 def stage_plan(info):
     shots = json.load(open(os.path.join(WORK, "shots.json")))
     flags_p = os.path.join(WORK, "shot_flags.json")
@@ -438,6 +467,9 @@ def stage_plan(info):
     excl = load_exclusions()
     used = []
     plan = []
+    intro_dur = compute_intro_dur()
+    json.dump({"intro_dur": intro_dur}, open(os.path.join(WORK, "intro_meta.json"), "w", encoding="utf-8"), indent=1)
+    t_timeline = intro_dur
     for (spec, text), ai in zip(BEATS, info):
         D = ai["dur"] + PAUSE
         nfr = round(D * FPS)
@@ -457,13 +489,15 @@ def stage_plan(info):
             raise SystemExit(f"no visuals for beat {ai['i'] + 1}: {spec}")
         used.extend((a, b) for a, b, _ in segs)
         plan.append({"i": ai["i"], "dur": D, "frames": nfr, "wav": ai["wav"], "audio_dur": ai["dur"],
+                     "start_sec": round(t_timeline, 3), "end_sec": round(t_timeline + D, 3),
                      "text": text, "segs": [list(s) for s in segs]})
+        t_timeline += D
     if HAS_HARDSUB:
         print("detecting tight 2D subtitle boxes per segment...", flush=True)
         detect_all_seg_boxes(plan)
     json.dump(plan, open(os.path.join(WORK, "plan.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     slow = [p["i"] + 1 for p in plan if any(s[2] < 0.95 for s in p["segs"])]
-    print(f"plan ok; beats with slow-motion fill: {slow}")
+    print(f"plan ok (intro_dur={intro_dur:.2f}s); beats with slow-motion fill: {slow}")
     return plan
 
 
@@ -593,7 +627,10 @@ def srt_time(t):
 def build_intro_assets():
     """Render INTRO_DUB (~30s Cold Open with short paused voice clips + 0.55s Freeze/Fade transition)."""
     if not INTRO_DUB:
+        json.dump({"intro_dur": 0.0}, open(os.path.join(WORK, "intro_meta.json"), "w", encoding="utf-8"), indent=1)
         return [], b"", [], 0.0
+    if HAS_HARDSUB:
+        ensure_2d_mask()
     intro_aud_p = os.path.join(WORK, "intro_audio.json")
     if os.path.exists(intro_aud_p):
         intro_info = json.load(open(intro_aud_p))
@@ -618,7 +655,6 @@ def build_intro_assets():
     cx, cy = (sw - W) // 2, (sh - H) // 2
     vf_base = f"fps={FPS_NUM}/{FPS_DEN},scale={sw}:{sh}:flags=lanczos,crop={W}:{H}:{cx}:{cy},setsar=1"
 
-    last_src_end = 0.0
     for b_i, blk in enumerate(blocks):
         t_blk_start = t_cur
         for idx, sfx_lead, post_pause, txt in blk["items"]:
@@ -663,21 +699,35 @@ def build_intro_assets():
         t_cur = t_blk_start + dur_exact
 
         vp = os.path.join(SEG, f"intro_blk_{b_i + 1:02d}.mp4")
-        run([FF, "-y", "-hide_banner", "-loglevel", "error",
-             "-ss", f"{blk['src_s']:.3f}", "-t", f"{dur_exact + 0.15:.3f}", "-i", SRC,
-             "-vf", f"{vf_base},tpad=stop_mode=clone:stop_duration=1.0", "-frames:v", str(n_frames), "-an",
-             *VCODEC_BEAT, vp])
+        if HAS_HARDSUB:
+            by = max(0, (BAND_Y // 2) * 2)
+            bh = min(H - by, ((BAND_H + 1) // 2) * 2)
+            fc_intro = (
+                f"[0:v]{vf_base},tpad=stop_mode=clone:stop_duration=1.0,split[vb][vt];"
+                f"[1:v]format=gray,scale={W}:{bh}[mk];"
+                f"[vt]crop={W}:{bh}:0:{by},boxblur=luma_radius=28:luma_power=3:chroma_radius=14:chroma_power=2,"
+                f"format=yuva420p[bl0];[bl0][mk]alphamerge[bl];"
+                f"[vb][bl]overlay=0:{by}:shortest=1,format=yuv420p[vo]"
+            )
+            run([FF, "-y", "-hide_banner", "-loglevel", "error",
+                 "-ss", f"{blk['src_s']:.3f}", "-t", f"{dur_exact + 0.15:.3f}", "-i", SRC,
+                 "-loop", "1", "-i", MASK_1D,
+                 "-filter_complex", fc_intro, "-map", "[vo]",
+                 "-frames:v", str(n_frames), "-an", *VCODEC_BEAT, vp])
+        else:
+            run([FF, "-y", "-hide_banner", "-loglevel", "error",
+                 "-ss", f"{blk['src_s']:.3f}", "-t", f"{dur_exact + 0.15:.3f}", "-i", SRC,
+                 "-vf", f"{vf_base},tpad=stop_mode=clone:stop_duration=1.0", "-frames:v", str(n_frames), "-an",
+                 *VCODEC_BEAT, vp])
         v_files.append(vp)
-        last_src_end = blk["src_s"] + dur_exact
 
-    # 0.55s Freeze Frame + Fade-out transition
+    # 0.55s Freeze Frame + Fade-out transition (sampled from the last rendered intro block)
     d_tr = 0.55
     n_tr = max(1, round(d_tr * FPS))
     d_tr_exact = n_tr / FPS
     frame_png = os.path.join(SEG, "intro_freeze.png")
-    vf_img = f"scale={sw}:{sh}:flags=lanczos,crop={W}:{H}:{cx}:{cy},setsar=1"
     run([FF, "-y", "-hide_banner", "-loglevel", "error",
-         "-ss", f"{max(0.0, last_src_end - 0.08):.3f}", "-i", SRC, "-frames:v", "1", "-vf", vf_img, frame_png])
+         "-sseof", "-0.08", "-i", v_files[-1], "-frames:v", "1", frame_png])
     vp_tr = os.path.join(SEG, "intro_freeze.mp4")
     vf_loop = f"fps={FPS_NUM}/{FPS_DEN},eq=brightness=0.06:contrast=1.08,fade=t=out:st={max(0.0, d_tr_exact - 0.40):.3f}:d=0.40,format=yuv420p"
     run([FF, "-y", "-hide_banner", "-loglevel", "error",
@@ -691,6 +741,7 @@ def build_intro_assets():
     if target_tot_samples > cur_samples:
         audio_chunks.append(b"\x00\x00" * (target_tot_samples - cur_samples))
 
+    json.dump({"intro_dur": round(t_cur, 4)}, open(os.path.join(WORK, "intro_meta.json"), "w", encoding="utf-8"), indent=1)
     return v_files, b"".join(audio_chunks), srt_entries, t_cur
 
 

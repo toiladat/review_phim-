@@ -119,10 +119,24 @@ def main():
     cap_out = cv2.VideoCapture(os.path.join(OUT, "review_vi.mp4"))
 
     t_acc = 0.0
+    intro_meta_p = os.path.join(ROOT, "work", "intro_meta.json")
+    if os.path.exists(intro_meta_p):
+        t_acc = float(json.load(open(intro_meta_p, encoding="utf-8")).get("intro_dur", 0.0))
+    elif plan and "start_sec" in plan[0]:
+        t_acc = float(plan[0]["start_sec"])
+    else:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+            from assemble import compute_intro_dur
+            t_acc = float(compute_intro_dur())
+        except Exception:
+            t_acc = 0.0
+
     mids = {}
     for p in plan:
-        mids[p["i"] + 1] = t_acc + p["dur"] * 0.5
-        t_acc += p["dur"]
+        t_start = float(p.get("start_sec", t_acc))
+        mids[p["i"] + 1] = t_start + p["dur"] * 0.5
+        t_acc = t_start + p["dur"]
 
     def get_src_frame(t):
         cap_src.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
