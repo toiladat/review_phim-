@@ -2,8 +2,8 @@
 
 Tài liệu này mô tả **chi tiết từng bước** quy trình đã dùng để biến:
 
-- **Đầu vào:** `1.mp4` (phim ngắn Trung Quốc, 65 phút, khung dọc 1078×1920, có phụ đề Trung in cứng) + `1.srt` (phụ đề Trung)
-- **Đầu ra:** `output/review_vi.mp4` (**20 phút 05 giây**, 1080×1920, lồng tiếng Việt phong cách Người Kể Chuyện, phụ đề Việt in sẵn) + `output/review_vi.srt` + `output/kich_ban_review.txt`
+- **Đầu vào:** `input/*.mp4` (phim ngắn Trung Quốc, khung dọc `9:16` hoặc ngang `16:9`, tự động nhận diện file trong `input/`) + `input/*.srt` (phụ đề Trung gốc)
+- **Đầu ra:** `output/review_vi.mp4` (**~24–27 phút**, gồm **~30s Mở màn Lồng tiếng Thoại gốc Cao trào `INTRO_DUB`** + **0.55s Freeze Frame chuyển cảnh** + **112–120 beat Review Người Kể Chuyện ~7.000–7.600 âm tiết**, mặc định khung hình sạch `BURN_SUBS = False`, tắt tiếng gốc phần Review `ORIG_VOL = 0.0`, tùy chọn che mờ sub Trung `BLUR_SUBS = False/True`) + `output/review_vi.srt` + `output/kich_ban_review.txt` + `output/youtube_seo.txt`
 
 > [!IMPORTANT]
 > Quy trình gồm **phần tự động (script Python + ffmpeg)** và **một phần do AI (trợ lý) làm thủ công**: đọc toàn bộ lời thoại, xem ảnh chụp các cảnh, rồi **tự viết kịch bản tiếng Việt** và chọn mốc thời gian hình ảnh cho từng câu. Hiện **chưa có script tự viết kịch bản** – file `pipeline/script_beats.py` là kết quả của bước này. Muốn làm phim khác, cần viết lại file đó (bằng tay hoặc nhờ AI) theo đúng định dạng mô tả ở [Bước 6](#bước-6--viết-kịch-bản-theo-beat-thủ-công--ai).
@@ -33,29 +33,29 @@ Tài liệu này mô tả **chi tiết từng bước** quy trình đã dùng đ
 
 ```mermaid
 flowchart TD
-    A["1.mp4 + 1.srt"] --> B["Bước 1: Khảo sát dữ liệu & môi trường"]
-    B --> C["Bước 2: Rút gọn SRT (condense_srt.py)"]
-    B --> D["Bước 3: Nhận dạng giọng nói toàn phim (asr.py, Whisper)"]
-    B --> E["Bước 4: Tách cú máy (shots.py, PySceneDetect)"]
-    B --> F["Bước 5a: Tìm vùng phụ đề Trung (detect_subband.py)"]
-    B --> G["Bước 5b: Ảnh tổng quan cảnh (contact_sheets.py)"]
-    C --> H["Bước 6: AI đọc thoại + xem ảnh → viết kịch bản 112 beat (script_beats.py)"]
+    A["input/*.mp4 + input/*.srt"] --> B["Bước 1: Kiểm tra đầu vào & tùy chọn BLUR_SUBS"]
+    B --> C["Bước 2: Rút gọn SRT (condense_srt.py) + Tìm vùng sub (detect_subband.py)"]
+    B --> D["Bước 3: Quét Whisper trên khoảng trống SRT > 40s (asr.py)"]
+    B --> E["Bước 4: Tách cú máy đa luồng 8 nhân (shots.py)"]
+    B --> G["Bước 5: Ảnh tổng quan cảnh (contact_sheets.py)"]
+    C --> H["Bước 6: AI đọc thoại + xem ảnh → viết INTRO_DUB (30s) + BEATS (112–120 beat) trong script_beats.py"]
     D --> H
     G --> H
-    H --> I["Bước 7: Lồng tiếng qua MCP dgt-auto-tts (112 file mp3)"]
+    H --> I["Bước 7: assemble.py make_srt → Lồng tiếng qua MCP dgt-auto-tts (giọng viet_rv_v2_dt6uCxVe, speed=1.0)"]
     E --> J["Bước 8: Lọc cảnh có chữ overlay (overlay_text.py)"]
     I --> K["Bước 9: assemble.py audio → plan → beats → final"]
     J --> K
-    F --> K
-    K --> L["Bước 10: QA (qa_tts.py, qa_sheet.py) → sửa beat lỗi → xuất lại"]
-    L --> M["output/review_vi.mp4 + .srt + kịch bản"]
+    C --> K
+    K --> L["Bước 10: QA (qa_tts.py, qa_sheet.py) + SEO (youtube_seo.txt) + Dọn rác"]
+    L --> M["output/review_vi.mp4 + review_vi.srt + kich_ban_review.txt + youtube_seo.txt"]
 ```
 
-Ý tưởng cốt lõi: **làm âm thanh trước, cắt hình sau (audio-first)**.
-1. Viết kịch bản thành nhiều **beat** (mỗi beat 1–3 câu, 3–15 giây), mỗi beat gắn **cửa sổ thời gian nguồn** (cảnh nào trong phim gốc minh họa cho câu đó).
-2. Lồng tiếng từng beat → biết **chính xác mỗi beat dài bao nhiêu giây**.
-3. Trong cửa sổ thời gian của beat, chọn các cú máy đẹp, rải đều, tổng thời lượng **khớp đúng** thời lượng giọng đọc.
-4. Ghép tất cả lại, phủ phụ đề, trộn âm.
+Ý tưởng cốt lõi: **Mở màn 30s Thoại gốc Cao trào (Cold Open Dubbing, không spoil kết cục) + Review Người Kể Chuyện (Audio-first)**.
+1. Mở đầu bằng **~28–35 giây (`INTRO_DUB`)** cắt trực tiếp phân cảnh cay nghiệt/kịch tính nhất phim (gồm `12–16` câu thoại ngắn `4–15` âm tiết, mỗi câu là 1 file voice riêng biệt kèm khoảng nghỉ tự nhiên `post_pause_sec` `0.20–0.60s`), dừng ngay ở đỉnh điểm Cliffhanger + `0.55s` Freeze Frame chuyển cảnh.
+2. Phần thân kịch bản chia thành **112–120 beat (`BEATS`, ~7.000–7.600 âm tiết)** theo ngôi thứ ba Người Kể Chuyện, mỗi beat dài `50–65` âm tiết (`4–5` vế ngắn ngăn cách bởi `3–4` dấu phẩy) và gắn **cửa sổ thời gian nguồn** bám sát hành động (`trung vị 40–50 giây`, không quá `85–90 giây`).
+3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và từng beat của `BEATS` bằng giọng chuẩn `viet_rv_v2_dt6uCxVe` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → biết **chính xác thời lượng từng câu**.
+4. Trong cửa sổ thời gian của mỗi beat, chọn các cú máy sạch, rải đều, tổng thời lượng **khớp đúng** thời lượng giọng đọc + `PAUSE = 0.14s` mà không bị làm chậm (`slow: []`).
+5. Ghép `INTRO_DUB` + `0.55s` Freeze Frame + `BEATS`, xuất phụ đề rời `.srt` và chuẩn hóa âm lượng `-15 LUFS`.
 
 ---
 
@@ -66,68 +66,66 @@ review_tool/
 ├── input/                    # 📥 Bỏ 1 file .mp4 và 1 file .srt của tập mới vào đây
 │   ├── 1.mp4                 # Phim gốc (hoặc bất kỳ tên *.mp4 nào trong input/)
 │   └── 1.srt                 # Phụ đề Trung gốc (hoặc bất kỳ tên *.srt nào trong input/)
-├── README.md                 # Tài liệu này
-├── tools/
-│   └── ffmpeg.exe            # ffmpeg 9 (từ imageio-ffmpeg) có libass + NVENC
-├── pipeline/                 # Toàn bộ code Core
+├── AGENTS.md                 # Quy tắc tự động nạp (Auto-loaded Workspace Rules) cho AI Agent
+├── README.md                 # Tài liệu chi tiết này
+├── tools/                    # (Tùy chọn trên Windows) Chứa ffmpeg.exe; trên macOS tự dùng ffmpeg hệ thống / imageio-ffmpeg
+├── pipeline/                 # Toàn bộ code Core (tự động nhận diện input/*.mp4 & input/*.srt)
 │   ├── condense_srt.py       # B2: rút gọn SRT thành khối thoại có mốc thời gian
-│   ├── asr.py                # B3: Whisper large-v3 nhận dạng thoại toàn phim
-│   ├── shots.py              # B4: tách cú máy (shot boundary)
-│   ├── detect_subband.py     # B5a: thống kê vị trí phụ đề Trung in cứng
-│   ├── contact_sheets.py     # B5b: ảnh lưới 6 giây/khung để AI "xem phim"
-│   ├── script_beats.py       # B6: KỊCH BẢN tiếng Việt (chia theo beat + cửa sổ thời gian)
+│   ├── asr.py                # B3: Whisper large-v3 quét các khoảng trống SRT > 40s (CUDA / CPU auto)
+│   ├── shots.py              # B4: tách cú máy đa luồng 8 nhân (ProcessPoolExecutor)
+│   ├── detect_subband.py     # B5a: thống kê vị trí phụ đề Trung in cứng & khung hình 9:16 / 16:9
+│   ├── contact_sheets.py     # B5b: xuất ~22 ảnh lưới tổng quan để AI xem phim
+│   ├── script_beats.py       # B6: KỊCH BẢN gồm INTRO_DUB (~30s mở màn) + BEATS (112–120 beat Review)
 │   ├── overlay_text.py       # B8: đánh dấu cú máy có chữ overlay (tên nhân vật, "未完待续")
-│   ├── assemble.py           # B9: dựng video (audio / plan / beats / final)
+│   ├── assemble.py           # B9: dựng video (make_srt / audio / plan / beats / final)
 │   ├── qa_tts.py             # B10: chuyển giọng đọc ngược thành chữ để soát lỗi phát âm
-│   ├── qa_sheet.py           # B10: ảnh lưới 1 khung/beat từ video thành phẩm
-│   └── make_thumbnails.py    # B11: thiết kế 3 mẫu Thumbnail YouTube/Shorts chuẩn UTF-8
-├── work/                     # File trung gian (tự tạo khi chạy, có thể xóa sau khi xong)
+│   ├── qa_sheet.py           # B10: ảnh lưới 1 khung/beat từ video thành phẩm (tự cộng độ lệch intro_dur)
+│   └── make_thumbnails.py    # B11: (Tùy chọn) thiết kế 3 mẫu Thumbnail YouTube/Shorts chuẩn UTF-8
+├── work/                     # File trung gian (tự tạo khi chạy, BẮT BUỘC xóa sạch sau khi xong)
 │   ├── srt_condensed.txt/.json
 │   ├── asr.json, asr_gaps.txt
 │   ├── shots.json, shot_flags.json, subbands.json, video_meta.json
 │   ├── sheets/               # Ảnh lưới tổng quan phim gốc
-│   ├── tts/narration.srt     # File nạp vào app TTS
-│   ├── tts/narration/        # 1.mp3 … N.mp3 do app TTS sinh ra
-│   ├── aud/                  # 001.wav … N.wav (đã cắt khoảng lặng)
-│   ├── beats/                # 001.mp4 … N.mp4 (video từng beat) + .sig (cache)
-│   ├── band_mask_2d.png      # Mặt nạ 2D viền mềm che vừa khít từng câu sub Trung
-│   ├── plan.json             # Kế hoạch cắt hình & tọa độ hộp che sub cho từng beat
+│   ├── tts/narration.srt     # File nạp vào app TTS (M câu INTRO_DUB + N câu BEATS)
+│   ├── tts/narration/        # 1.mp3 … (M+N).mp3 do app TTS sinh ra
+│   ├── aud/                  # intro_001.wav … & 001.wav … (đã cắt khoảng lặng đầu/cuối)
+│   ├── beats/                # intro_blk_*.mp4, intro_freeze.mp4, 001.mp4 … + .sig (cache)
+│   ├── band_mask_2d.png      # Mặt nạ 2D viền mềm che vừa khít từng câu sub Trung (khi BLUR_SUBS=True)
+│   ├── intro_audio.json      # Thời lượng từng câu thoại ngắn trong INTRO_DUB
+│   ├── intro_meta.json       # Tổng thời lượng phần mở màn (intro_dur) để đồng bộ QA & Chapters
+│   ├── plan.json             # Kế hoạch cắt hình, start_sec/end_sec & hộp che sub cho từng beat
 │   ├── beats_audio.json
-│   ├── joined.mp4            # Ghép các beat
-│   ├── narration_full.wav    # Toàn bộ giọng đọc đã căn thời gian
+│   ├── joined.mp4            # Ghép intro + các beat
+│   ├── narration_full.wav    # Toàn bộ giọng đọc đã căn thời gian chính xác tới từng mẫu
 │   ├── subs_vi.ass           # Phụ đề Việt định dạng ASS
 │   └── qa/                   # Ảnh QA
 └── output/                   # 📤 Tự tạo khi xuất thành phẩm
-    ├── review_vi.mp4         # ⭐ VIDEO THÀNH PHẨM
-    ├── review_vi.srt         # Phụ đề Việt dạng SRT
-    ├── kich_ban_review.txt   # Kịch bản kèm số thứ tự beat
+    ├── review_vi.mp4         # ⭐ VIDEO THÀNH PHẨM (30s Cold Open + 0.55s Freeze + Review)
+    ├── review_vi.srt         # Phụ đề Việt rời dạng SRT
+    ├── kich_ban_review.txt   # Kịch bản kèm lời INTRO_DUB và số thứ tự beat
     ├── youtube_seo.txt       # Bộ Tiêu đề, Mô tả, Chapters, Tags chuẩn SEO YouTube
-    └── thumbnail_*.jpg       # Bộ 3 Thumbnail (2 ngang 16:9 + 1 dọc 9:16)
+    └── thumbnail_*.jpg       # (Tùy chọn) Bộ 3 Thumbnail (2 ngang 16:9 + 1 dọc 9:16)
 ```
 
 ---
 
-## 3. Yêu cầu môi trường
+## 3. Yêu cầu môi trường (Hỗ trợ đa nền tảng macOS & Windows)
 
 | Thành phần | Dùng để | Ghi chú |
 |---|---|---|
-| Windows + PowerShell | Môi trường chạy | |
-| Python 3.10 | Chạy pipeline | |
-| GPU NVIDIA (RTX 4080) | Whisper (CUDA) + mã hóa video NVENC | Không có GPU vẫn chạy được nhưng phải đổi `h264_nvenc` → `libx264`, Whisper chạy CPU rất chậm |
-| `faster-whisper` | Nhận dạng thoại tiếng Trung | Model `large-v3`, `float16` |
-| `torch` (cu121) | Cung cấp `cublas64_12.dll` cho faster-whisper | Xem [lỗi 12.1](#121-whisper-báo-thiếu-cublas64_12dll) |
-| `scenedetect` 0.7 | Tách cú máy | |
-| `opencv-python`, `numpy` | Đọc khung hình, ảnh lưới, phát hiện chữ | |
-| `imageio-ffmpeg` | Lấy ffmpeg 9 có sẵn **libass** (in phụ đề) và **NVENC** | Đã copy vào `tools/ffmpeg.exe` |
-| App **DgtAutoTTSMM** + MCP `dgt-auto-tts` | Lồng tiếng Việt (MiniMax, giọng clone) | MCP chạy ở `http://localhost:39217/mcp`, giọng `viet_review_dt6Rssa4`, model `speech-02-hd` |
-| Font **Roboto Bold** | Phụ đề Việt | Có sẵn trong `C:\Windows\Fonts` |
+| Hệ điều hành | macOS (`zsh`/`bash`) hoặc Windows (`PowerShell`) | Tự động nhận diện hệ điều hành trong code |
+| Python 3.10+ | Chạy pipeline | |
+| Mã hóa phần cứng | NVIDIA GPU (`h264_nvenc` trên Windows) hoặc Apple Silicon (`h264_videotoolbox` trên macOS) | Tự động chọn encoder theo OS (`IS_MAC` trong `assemble.py`) |
+| `faster-whisper`, `torch` | Nhận dạng thoại tiếng Trung (`asr.py`) & QA tiếng Việt (`qa_tts.py`) | Tự động dùng `cuda` (`float16`) nếu có GPU NVIDIA, hoặc fallback sang `cpu` (`int8`) trên macOS |
+| `scenedetect` 0.7 | Tách cú máy đa luồng (`shots.py`) | |
+| `opencv-python`, `numpy`, `Pillow` | Đọc khung hình, ảnh lưới, phát hiện chữ, tạo mặt nạ | |
+| `ffmpeg` / `imageio-ffmpeg` | Cắt ghép video/audio và xử lý filter | Tự động dò `tools/ffmpeg.exe` -> `imageio_ffmpeg` -> `ffmpeg` trong PATH hệ thống |
+| App **DgtAutoTTSMM** + MCP `dgt-auto-tts` | Lồng tiếng Việt (MiniMax, giọng clone) | Giọng chuẩn `viet_rv_v2_dt6uCxVe` (`tools/voice_sample_v2.mp3`), model `speech-02-hd`, `speed = 1.0` |
 
 Cài thư viện Python:
 
-```powershell
-pip install faster-whisper scenedetect opencv-python numpy imageio-ffmpeg
-# torch bản CUDA (đã có sẵn trên máy): torch==2.5.1+cu121
-python -c "import imageio_ffmpeg as i;print(i.get_ffmpeg_exe())"   # copy file này thành tools\ffmpeg.exe
+```bash
+pip install faster-whisper scenedetect opencv-python numpy Pillow imageio-ffmpeg torch
 ```
 
 ---
@@ -241,96 +239,102 @@ Lược bỏ: các đoạn tóm tắt lặp lại đầu mỗi tập, thoại ph
 **6.2. Định dạng file `script_beats.py` (Gồm `INTRO_DUB` 30s Mở màn Thoại gốc + `BEATS` Review)**
 
 ```python
-TITLE = "CHÀNG NHÂN VIÊN QUÈN THỰC CHẤT LÀ TỔNG TÀI TRĂM TỶ"
+TITLE = "TIỆM ĂN THÔNG THIÊN GIÚP PHẾ THÁI TỬ ĐOẠT LẠI NGAI VÀNG"
 
-# Phần 1: ~30 giây Mở màn Lồng tiếng Thoại gốc Cao trào (Tách từng câu ngắn có ngắt nghỉ tự nhiên)
-# Mỗi dòng = 1 file voice độc lập (4–15 âm tiết, dài 0.8–2.8s), tuyệt đối KHÔNG gộp thành 1 câu dài ngoằng!
+# Phần 1: ~30 giây Mở màn Lồng tiếng Thoại gốc Cay nghiệt / Gay cấn (TUYỆT ĐỐI KHÔNG SPOIL KẾT QUẢ)
+# Mỗi dòng = 1 file voice độc lập (4–15 âm tiết, dài 0.8–3.0s), tuyệt đối KHÔNG gộp thành 1 câu dài ngoằng!
 # Định dạng: (block_id, "h:mm:ss.s", sfx_lead_sec, post_pause_sec, "Câu thoại ngắn")
 INTRO_DUB = [
-    (1, "1:47:24.2", 0.00, 0.22, "Nhìn thấy chưa,"),
-    (1, "1:47:24.2", 0.00, 0.25, "đó là bố ruột của tôi,"),
-    (1, "1:47:24.2", 0.00, 0.65, "giám khảo chính hôm nay đích thân đến chống lưng cho tôi đấy."),
-    (1, "1:47:24.2", 0.00, 0.38, "Lục Trầm, hôm nay mày tiêu đời chắc rồi."),
-    (1, "1:47:24.2", 0.00, 0.25, "Tao sẽ cho mày thua không còn mảnh vải che thân."),
-    (2, "1:48:00.2", 1.65, 0.42, "Đồ nghiệt tử không biết trời cao đất dày!"),
-    (2, "1:48:00.2", 0.00, 0.30, "Mày câm miệng ngay cho tao!"),
+    ("blk1", "00:17:18.00", 0.00, 0.25, "Hoàng hậu nương nương có ý chỉ,"),
+    ("blk1", "00:17:18.00", 0.00, 0.35, "ban cho Phế Thái tử một bình rượu độc."),
+    ("blk1", "00:17:18.00", 0.00, 0.28, "Lưu công công, bổn cung có thể uống chén rượu này,"),
+    ("blk1", "00:17:18.00", 0.00, 0.45, "nhưng xin hãy tha mạng cho năm mươi sáu người già yếu trong viện."),
+    ("blk2", "00:18:22.00", 0.00, 0.28, "Đợi Phế Thái tử tắt thở xong,"),
+    ("blk2", "00:18:22.00", 0.00, 0.38, "lập tức châm lửa thiêu rụi toàn bộ Hàn Ngô Viện,"),
     ...
 ]
 
-# Phần 2: Các Beat Review theo Phong cách Người Kể Chuyện (Ngôi thứ ba)
+# Phần 2: Các Beat Review theo Phong cách Người Kể Chuyện (Ngôi thứ ba, 112–120 beat, ~7.000–7.600 âm tiết)
 BEATS = [
-    # Beat 1: Nối tiếp ngay sau điểm cắt 30s mở màn (sau 0.55s Freeze Frame chuyển cảnh)
-    ("1:49:29-1:49:44", "Chỉ bằng một lời phán quyết lạnh lùng tước đoạt hợp đồng sống còn ngay trên sóng truyền hình..."),
-    # Beat 2: Cầu nối đưa mạch truyện quay ngược về đầu phim
-    ("0:00:00-0:01:36", "Để hiểu vì sao vị thái tử gia nắm giữ đế chế Hoàn Vũ Lục thị hàng trăm tỷ lại ẩn danh..."),
+    # Beat 1–2: Cầu nối Mở Vòng Lặp Tò Mò (Không Spoil Kết Cục) ngay sau 0.55s Freeze Frame chuyển cảnh
+    ("0:20:00-0:20:45", "Giữa lãnh cung Hàn Ngô Viện ngập tràn sát khí trong đêm Đông giá rét, vị Phế Thái tử..."),
+    ("0:01:40-0:02:25", "Đám nô tài ngạo mạn của Hoàng hậu có nằm mơ cũng chẳng ngờ rằng, phía sau bức bình phong..."),
     ...
 ]
 ```
 
-- **Quy tắc `INTRO_DUB` (~30s Mở màn Thoại gốc):**
-  - Chọn phân cảnh đấu khẩu / vạch mặt gay cấn nhất phim, cắt bỏ các đoạn thoại phụ rườm rà ở giữa để cô đọng trong `3–5` cụm cảnh gốc liền mạch (`block_id`), tổng thời lượng **28 – 33 giây**.
-  - **Tách từng câu ngắt nghỉ thành Voice mới:** Chỗ nào trong `.srt` gốc nhân vật ngắt nghỉ hoặc chuyển câu thì tách thành 1 phần tử riêng trong `INTRO_DUB` (12–16 câu thoại ngắn cho 30s mở màn) để app TTS đọc thành **file voice mới riêng biệt**, chèn khoảng nghỉ `post_pause_sec` (`0.22s – 0.65s`) khớp với khẩu hình và nhịp chuyển góc máy.
+- **Quy tắc `INTRO_DUB` (~30s Mở màn Thoại gốc – Cấm Spoil Kết Cục):**
+  - Chọn phân cảnh **cay nghiệt, ức chế tột độ** (bị sỉ nhục, bị phản bội phũ phàng, bị vu oan giá họa, bị bức tử...) hoặc phân cảnh **gay cấn đang bỏ lửng trước khi lật kèo**. **TUYỆT ĐỐI KHÔNG** lấy cảnh kết quả cuối phim (khi phản diện đã bị trừng phạt phá sản hay lộ diện thân phận giải quyết xong xuôi) đưa lên 30s đầu.
+  - Gọt bỏ các đoạn thoại phụ rườm rà ở giữa để cô đọng trong `3–6` cụm cảnh gốc liền mạch (`block_id`), tổng thời lượng **28 – 35 giây**.
+  - **Tách từng câu ngắt nghỉ thành Voice mới:** Chỗ nào trong `.srt` gốc nhân vật ngắt nghỉ hoặc chuyển câu thì tách thành 1 phần tử riêng trong `INTRO_DUB` (**12–16 câu thoại ngắn**, mỗi câu **4–15 âm tiết**, dài **0.8–3.0 giây**) để app TTS đọc thành **file voice mới riêng biệt**, chèn khoảng nghỉ `post_pause_sec` (`0.20s – 0.60s`) khớp với khẩu hình và nhịp chuyển góc máy.
   - Tự động kết thúc phần mở màn bằng **0.55 giây khựng hình chuyển cảnh (Freeze Frame + Fade tối dần)** trước khi vào `BEATS`.
-- **Quy tắc `BEATS` (Phần thân Review):**
-  - **Cửa sổ thời gian** dạng `h:mm:ss-h:mm:ss`, nhiều cửa sổ cách nhau bằng dấu phẩy.
-  - Lời bình giữ 100% **ngôi thứ ba (Người Dẫn Chuyện)**, viết **số bằng chữ** ("ba trăm nghìn tệ", "hai năm") để TTS đọc tự nhiên.
+- **Quy tắc `BEATS` (Phần thân Review – 112–120 beat, ~7.000–7.600 âm tiết):**
+  - **Cửa sổ thời gian** dạng `h:mm:ss-h:mm:ss` (trung vị **40–50 giây**, dao động **28–65 giây**, tuyệt đối **không vượt quá 85–90 giây**; từ Beat 3 trở đi hai beat liên tiếp **không chồng lấn quá 8–10 giây**). Nhiều cửa sổ cách nhau bằng dấu phẩy.
+  - Lời bình giữ 100% **ngôi thứ ba (Người Dẫn Chuyện)**, mỗi beat dài **50–65 âm tiết** chia thành **4–5 vế ngắn** (`10–16 âm tiết/vế`) ngăn cách bởi **3–4 dấu phẩy `,`**, viết **số bằng chữ** ("ba trăm nghìn tệ", "hai năm") để TTS đọc tự nhiên.
 
 **6.3. Cấu trúc kịch bản**
 
 | Phần | Cấu trúc | Nội dung | Thời lượng |
 |---|---|---|---|
-| Mở màn Thoại gốc (`INTRO_DUB`) | 12–16 câu thoại ngắn | Cắt cảnh cao trào đắt giá nhất phim, lồng tiếng Việt trực tiếp từng câu ngắn có ngắt nghỉ tự nhiên, dừng ở Cliffhanger + `0.55s` Freeze Frame | ~30–33 giây |
-| Cầu nối vào Review | Beat 1–2 | Nêu hậu quả tức thì của màn cao trào + lật thân phận nhân vật chính + dẫn ngược về đầu phim | ~25 giây |
+| Mở màn Thoại gốc (`INTRO_DUB`) | 12–16 câu thoại ngắn (`3–6` khối `block_id`) | Cắt cảnh cay nghiệt / kịch tính bỏ lửng trước khi lật kèo (không spoil kết quả), lồng tiếng Việt từng câu ngắn có ngắt nghỉ `0.20–0.60s`, dừng ở Cliffhanger + `0.55s` Freeze Frame | ~28–35 giây (+ `0.55s` chuyển cảnh) |
+| Cầu nối vào Review | Beat 1–2 | Xoáy sâu vào sự cay nghiệt vừa diễn ra + mở vòng lặp tò mò về cơ hội đổi đời ẩn giấu (không lộ kết cục) + dẫn ngược về đầu phim | ~25–30 giây |
 | Hồi 1 | Beat 3–24 | Khởi đầu xung đột, biến cố mở màn | |
 | Hồi 2–8 | Beat 25–105 | Các nấc thang xung đột, phản kích và lật mở sự thật | |
-| Hồi cuối + Kết | Beat 106–120 | Cao trào báo ứng, đại đoàn viên và thông điệp khép lại | |
+| Hồi cuối + Kết | Beat 106–120 | Cao trào báo ứng, đại đoàn viên và thông điệp khép lại | Tổng video ~24–27 phút |
 
 ### Bước 7 – Lồng tiếng qua MCP `dgt-auto-tts`
+
+Tạo file `work/tts/narration.srt` gồm toàn bộ `INTRO_DUB` (`1 .. M`) nối tiếp `BEATS` (`M+1 .. M+N`):
+
+```bash
+python pipeline/assemble.py make_srt
+```
 
 Luồng gọi MCP:
 
 ```
 get_status            → kiểm tra đăng nhập, giọng đang chọn
-list_voices           → giọng "viet_rv_dt6dOAIc" / "viet_review_dt6Rssa4" (Vietnamese)
-set_tts_settings      → change_speed=true, speed=1.08  (trả về 1.0 sau khi xong)
+list_voices / select_voice → giọng chuẩn "viet_rv_v2_dt6uCxVe" (nếu máy mới chưa có thì clone từ tools/voice_sample_v2.mp3)
+set_tts_settings      → change_speed=false, speed=1.0, model="speech-02-hd" (giữ nguyên tốc độ tự nhiên 1.0)
 load_input            → work/tts/narration.srt   (gồm M câu ngắn INTRO_DUB + N câu BEATS)
-start_tts             → merge_short_lines=false
-get_status / get_progress → chờ done = M + N
+start_tts             → allow_long_lines=true, merge_short_lines=false
+get_status / get_progress → chờ done = len(INTRO_DUB) + len(BEATS)
 ```
 
-- File `narration.srt` được tạo từ `INTRO_DUB` nối tiếp `BEATS`: mỗi câu thoại ngắn trong `INTRO_DUB` và mỗi beat trong `BEATS` là **một entry SRT riêng** để app tạo một file voice mới độc lập cho từng câu (`1.mp3 … (M+N).mp3`).
+- File `narration.srt` được tạo tự động bằng `python pipeline/assemble.py make_srt`: mỗi câu thoại ngắn trong `INTRO_DUB` và mỗi beat trong `BEATS` là **một entry SRT riêng** để app tạo một file voice mới độc lập cho từng câu (`1.mp3 … (M+N).mp3`).
 
 > [!WARNING]
-> **Không nạp file `.txt`**: app tự gộp nhiều dòng thành một khối (112 dòng → 42 khối) làm mất ánh xạ 1 beat = 1 file. Phải dùng `.srt` để giữ đúng 112 file.
+> **Không nạp file `.txt`**: app tự gộp nhiều dòng thành một khối làm mất ánh xạ 1 câu = 1 file. Bắt buộc dùng `python pipeline/assemble.py make_srt` để xuất `.srt` chuẩn gồm đúng `len(INTRO_DUB) + len(BEATS)` mục.
 
 ### Bước 8 – Lọc cảnh có chữ overlay (`overlay_text.py`)
 
-```powershell
-python pipeline\overlay_text.py              # quét toàn bộ cú máy
-python pipeline\overlay_text.py 2.5 409 10   # chế độ thử: in điểm số tại các giây chỉ định
+```bash
+python -u pipeline/overlay_text.py              # quét toàn bộ cú máy
+python -u pipeline/overlay_text.py 2.5 409 10   # chế độ thử: in điểm số tại các giây chỉ định
 ```
 
 - Với mỗi cú máy, lấy 2 khung (25% và 75% độ dài), tìm chữ trắng viền đen **bên ngoài** dải phụ đề thường (bỏ qua y 1235–1585).
 - Đếm các mảng nhỏ (8–1500 pixel, rộng/cao < 120 px) giống nét chữ → điểm số.
 - Kết quả thử nghiệm phân tách rất rõ: khung có thẻ tên / "未完待续" cho điểm **3800–9000**, khung bình thường **0–108**. Ngưỡng chọn: **≥ 1500 = có chữ**.
-- 32/1302 cú máy bị đánh dấu → `work/shot_flags.json`. Ở Bước 9, các cú máy này chỉ được dùng khi trong cửa sổ không còn lựa chọn nào khác.
+- Các cú máy dính chữ được lưu vào `work/shot_flags.json`. Ở Bước 9, các cú máy này chỉ được dùng khi trong cửa sổ không còn lựa chọn nào khác.
 
 ### Bước 9 – Dựng video (`assemble.py`)
 
-```powershell
-cd pipeline
-python -u assemble.py                       # chạy cả 4 giai đoạn
-python -u assemble.py plan beats final      # chạy từng giai đoạn tùy ý
+```bash
+python pipeline/assemble.py make_srt              # tạo work/tts/narration.srt (INTRO_DUB + BEATS)
+python -u pipeline/assemble.py audio plan         # xử lý audio + lập kế hoạch cắt hình
+python -u pipeline/assemble.py beats final        # render các beat + ghép video thành phẩm
 ```
 
 | Giai đoạn | Làm gì | Đầu ra |
 |---|---|---|
-| `audio` | Đọc `N.mp3`, **cắt khoảng lặng đầu/cuối + thu gọn mượt mọi khoảng nghỉ dài `> 140ms` bên trong câu (`_smooth_compress_pauses`) + khóa đồng nhất tốc độ nhả chữ (`TARGET_SPEECH_RATE = 5.22` âm tiết/giây)**, chuyển sang wav 48 kHz mono | `work/aud/NNN.wav`, `beats_audio.json` |
-| `plan` | Với mỗi beat: thời lượng = giọng đọc + 0,09 giây nghỉ, làm tròn theo số khung hình; chọn các đoạn hình trong cửa sổ nguồn (xem [mục 6](#6-thuật-toán-ghép-hình-khớp-lời)) | `work/plan.json` |
-| `beats` | Render mỗi beat thành 1 file mp4 (3 luồng song song, NVENC): cắt các đoạn, phóng 1,05×, ghép, làm mờ dải phụ đề Trung, giữ âm gốc 13%, khóa đúng số khung hình | `work/beats/NNN.mp4` |
-| `final` | Ghép 112 beat (`concat`, không mã hóa lại) → dựng track giọng đọc khớp từng mẫu âm thanh → tạo phụ đề ASS → in phụ đề + fade đầu/cuối + trộn âm + chuẩn hóa âm lượng | `output/review_vi.mp4` |
+| `make_srt` | Xuất toàn bộ `INTRO_DUB` (`1..M`) nối tiếp `BEATS` (`M+1..M+N`) ra file SRT chuẩn để nạp vào MCP TTS | `work/tts/narration.srt` |
+| `audio` | Đọc `1.mp3 … (M+N).mp3`, **chỉ cắt khoảng lặng đầu/cuối bằng `silenceremove` (`-48 dB`)**, chuyển sang wav 48 kHz mono (**CẤM** nén khoảng nghỉ bên trong câu, **CẤM** đổi tốc độ `atempo` từng beat) | `work/aud/intro_NNN.wav`, `work/aud/NNN.wav`, `intro_audio.json`, `beats_audio.json` |
+| `plan` | Với mỗi beat: thời lượng = giọng đọc + **0,14 giây nghỉ (`PAUSE = 0.14`)**, làm tròn theo số khung hình; tính `intro_dur` lưu vào `work/intro_meta.json`, ghi `start_sec`/`end_sec` và chọn các đoạn hình trong cửa sổ nguồn | `work/plan.json`, `work/intro_meta.json` |
+| `beats` | Render mỗi beat thành 1 file mp4 (3 luồng song song, mã hóa phần cứng `h264_nvenc` trên Windows hoặc `h264_videotoolbox` trên macOS): cắt các đoạn, phóng 1,05×, tùy chọn làm mờ hộp phụ đề Trung 2D (`BLUR_SUBS`), tắt tiếng gốc (`ORIG_VOL = 0.0`, `-an`), khóa đúng số khung hình | `work/beats/NNN.mp4` + `.sig` |
+| `final` | Render `INTRO_DUB` (~30s + `0.55s` Freeze Frame chuyển cảnh) → ghép với toàn bộ các beat (`concat`) → dựng track âm thanh khớp từng mẫu (giữ `sfx_lead_sec` + `post_pause_sec` ở Intro và `PAUSE = 0.14s` ở Review) → xuất phụ đề rời `.srt` (mặc định `BURN_SUBS = False`) + chuẩn hóa âm lượng `-15 LUFS` | `output/review_vi.mp4`, `output/review_vi.srt`, `output/kich_ban_review.txt` |
 
-**Cơ chế cache:** mỗi `NNN.mp4` có file `NNN.mp4.sig` lưu "chữ ký" (danh sách đoạn cắt + tham số). Chạy lại chỉ render những beat có thay đổi → sửa vài beat chỉ mất ~1–2 phút.
+**Cơ chế cache:** mỗi `NNN.mp4` có file `NNN.mp4.sig` lưu "chữ ký" (danh sách đoạn cắt + tham số). Chạy lại chỉ render những beat có thay đổi → sửa vài beat chỉ mất ~15–30 giây.
 
 ### Bước 10 – Kiểm tra chất lượng và sửa lỗi
 
@@ -342,11 +346,11 @@ Xem chi tiết ở [mục 8](#8-kiểm-tra-chất-lượng-qa). Sau vòng QA đ�
 
 Đây là **bí quyết quan trọng nhất** phân định giữa một video review nghe "như máy dịch phụ đề" (cứng nhắc, sượng, rời rạc) và một video review **cuốn hút như người thật kể chuyện**.
 
-### 5.1. Tại sao cấm trích dẫn lời thoại trực tiếp khi dùng 1 giọng TTS?
+### 5.1. Tại sao cấm trích dẫn lời thoại trực tiếp ở phần thân Review (`BEATS`)?
 
-Khi dùng một giọng đọc TTS duy nhất xuyên suốt 15–20 phút:
-- Nếu viết theo kiểu kịch bản có dấu hai chấm (`:`) hoặc nhảy ngôi xưng hô (*"Lộ Lộ nói: cho mình mượn bạn trai cậu nhé. Hân Nhiễm đáp: không cần"*), giọng TTS không thể đổi giọng nam/nữ hay đóng kịch như diễn viên lồng tiếng. Người nghe sẽ thấy **rất sượng** vì câu trước vừa gọi nhân vật là *"cô"*, câu sau đã xưng *"tôi / mình / em / con"*.
-- Ngược lại, khi **giữ vững 100% ngôi kể của Người Dẫn Chuyện (ngôi thứ ba)** và chuyển toàn bộ lời thoại thành **lời kể gián tiếp lột tả tâm lý, thái độ và sự trớ trêu**, mạch truyện chảy mượt như nước, giọng TTS phát huy tối đa độ truyền cảm.
+Sau 30 giây mở màn lồng tiếng thoại gốc (`INTRO_DUB`), khi bước vào phần thân Review (`BEATS`) kéo dài ~24–27 phút với một giọng đọc TTS duy nhất:
+- Nếu viết theo kiểu kịch bản có dấu hai chấm (`:`) hoặc nhảy sang ngôi thứ nhất/ngôi thứ hai đối thoại trực tiếp (*"Lộ Lộ nói: cho mình mượn bạn trai cậu nhé. Hân Nhiễm đáp: không cần"*), giọng TTS không thể đổi giọng nam/nữ ở từng vế. Người nghe sẽ thấy **rất sượng** vì câu trước vừa gọi nhân vật là *"cô"*, câu sau đã xưng *"tôi / tao / mày / cậu / tớ"*.
+- Ngược lại, khi **giữ vững 100% ngôi kể của Người Dẫn Chuyện (ngôi thứ ba)** và chuyển toàn bộ lời thoại thành **lời kể gián tiếp lột tả tâm lý, thái độ và sự trớ trêu** (sử dụng tự nhiên các đại từ ngôi thứ ba chỉ nhân vật như *anh, cô, hắn, ả, ông, bà, cậu bé* và các từ ghép tiếng Việt thông dụng như *giật mình, mình mẩy, đàn em, con người*), mạch truyện chảy mượt như nước và giọng TTS phát huy tối đa độ truyền cảm.
 
 ### 5.2. Bảng đối chiếu thực tế: Cách viết Cứng nhắc (CẤM) vs. Phong cách Người Kể Chuyện (CHUẨN)
 
@@ -380,21 +384,21 @@ Khi dùng một giọng đọc TTS duy nhất xuyên suốt 15–20 phút:
    - **Lắng đọng / Kết thúc:** *Giờ đây khi mây mù đã tan biến..., Khép lại câu chuyện...*
 5. **Quy tắc "Cân đối độ dài câu với cửa sổ hình ảnh (Zero Slow-Motion)":**
    - Ở tốc độ TTS `1.08`, giọng đọc phát âm trung bình **~4,2 âm tiết/giây**.
-   - Một beat có `W` âm tiết sẽ cần khoảng `W / 4.2` giây hình ảnh sạch (không dính chữ overlay).
-   - Trước khi chạy TTS, luôn kiểm tra: `độ_dài_cảnh_sạch >= (số_âm_tiết / 4.2) * 0.9`. Nếu cảnh gốc ngắn (ví dụ cảnh tai nạn 7 giây), phải viết câu ngắn gọn, súc tích (22–28 âm tiết); nếu cảnh đối chất dài (25–35 giây), viết câu đầy đặn (45–55 âm tiết) để **không một beat nào bị làm chậm (slow-motion)**.
+   - Mỗi beat trong `BEATS` có độ dài chuẩn **50–65 âm tiết** (tương ứng ~12–15 giây giọng đọc), chia thành **4–5 vế ngắn** ngăn cách bởi **3–4 dấu phẩy `,`** (mỗi vế **10–16 âm tiết**).
+   - Cửa sổ thời gian nguồn `spec` của mỗi beat phải có trung vị **40–50 giây** (dao động **28–65 giây**, tuyệt đối **không vượt quá 85–90 giây**, và từ Beat 3 trở đi hai beat liên tiếp **không chồng lấn quá 8–10 giây**) để đảm bảo đủ cảnh sạch và **không một beat nào bị làm chậm (`slow: []`)**.
 
-### 5.4. Công thức "Giải phẫu 3 lớp" cho mỗi Beat (3-Layer Beat Anatomy)
+### 5.4. Công thức "Giải phẫu 3 lớp" cho mỗi Beat (3-Layer Beat Anatomy – 50–65 âm tiết/beat)
 
-Để mỗi câu văn nghe dày dặn, có hồn và không bao giờ bị cụt lủn như bản tóm tắt khô khan, mỗi beat đều được cấu tạo từ **3 lớp thông tin hòa quyện vào nhau**:
+Để mỗi câu văn nghe dày dặn, có hồn và có nhịp thở tự nhiên, mỗi beat trong `BEATS` (`50–65 âm tiết`) được chia thành **4–5 vế ngắn** (`10–16 âm tiết/vế`, ngăn cách bởi `3–4 dấu phẩy`) theo **3 lớp thông tin hòa quyện vào nhau**:
 
-1. **Lớp 1 – Trạng thái / Thái độ mở nhịp (Emotional Frame, 6–12 âm tiết đầu):**
+1. **Lớp 1 – Trạng thái / Bối cảnh mở nhịp (Emotional Frame, 8–14 âm tiết đầu + dấu phẩy `,`):**
    - Đặt ngay không khí, tâm lý hoặc sự đối lập ở đầu câu để dẫn dắt cảm xúc người nghe trước khi nói tới hành động.
-   - *Ví dụ:* `"Không một chút dây dưa,"` / `"Hoảng sợ trước nguy cơ mất cô vĩnh viễn,"` / `"Giữa lúc Hạ Xuyên đang đau đớn tột độ vì cái chết của mẹ,"` / `"Trong cơn tuyệt vọng tột cùng,"` / `"Khép lại cuốn nhật ký đẫm nước mắt,"`.
-2. **Lớp 2 – Hành động cốt lõi đã chuyển hóa (Transformed Action, 15–25 âm tiết giữa):**
+   - *Ví dụ:* `"Giữa tiếng xì xào bàn tán đầy phẫn nộ của quan khách,"` / `"Hoảng sợ trước nguy cơ mất cô vĩnh viễn,"` / `"Giữa lúc Hạ Xuyên đang đau đớn tột độ vì cái chết của mẹ,"`.
+2. **Lớp 2 – Hành động cốt lõi dùng động từ mạnh (Transformed Action, 25–35 âm tiết giữa, chia 2–3 vế bằng dấu phẩy `,`):**
    - Thay vì dùng các động từ nhạt nhẽo (*nói, bảo, làm, đi*), hãy dùng **động từ mạnh mang sắc thái tâm lý**: *vạch trần, dội một gáo nước lạnh, phủi sạch quan hệ, đánh tráo thân phận, bòn rút, thao túng, dồn vào cái bẫy pháp lý không lối thoát, đập tan ảo tưởng*.
-3. **Lớp 3 – Dư âm / Điểm nhấn cuối câu (Emotional / Ironic Punchline, 12–20 âm tiết cuối):**
+3. **Lớp 3 – Dư âm / Điểm nhấn cuối câu (Emotional / Ironic Punchline, 12–16 âm tiết cuối sau dấu phẩy `,`):**
    - Khép lại beat bằng một mệnh đề đắt giá đọng lại trong tai người nghe trước khi chuyển sang beat kế tiếp.
-   - *Ví dụ:* `"...đến cả người đàn ông bội bạc kia cô còn chẳng tiếc, huống hồ là mấy món đồ vô tri."` / `"...khiến ngay cả quyền được tưởng nhớ bạn thân cũng bị đánh cắp."` / `"...nhưng đáp lại ả chỉ là ánh mắt lạnh lẽo và xa lạ chưa từng có."`
+   - *Ví dụ:* `"...đẩy kẻ ăn cháo đá bát từ đỉnh cao danh vọng xuống thẳng vực sâu vạn trượng."` / `"...khiến ngay cả quyền được tưởng nhớ bạn thân cũng bị đánh cắp."`
 
 ### 5.5. Kỹ thuật "Nén Hội Thoại & Bóc Trần Ẩn Ý" (Subtext Extraction)
 
@@ -421,9 +425,9 @@ Khán giả xem review cực kỳ bị cuốn hút bởi sự châm biếm hoặ
 
 1. **Đan cài các cụm 4 chữ và thành ngữ đối xứng (Nhịp 2–2):**
    - Tiếng Việt có độ vang tự nhiên rất cao khi dùng các cụm 4 chữ cân xứng: *người hầu kẻ hạ, ăn chung ở chung, được lời như cởi tấm lòng, được đằng chân lân đằng đầu, danh chính ngôn thuận, biệt vô âm tín, một trời một vực, tan cửa nát nhà, bình an vô sự, không hơn không kém*.
-2. **Kiểm soát độ dài vế câu theo nhịp thở (8 – 22 âm tiết/vế):**
-   - Không viết một mệnh đề liền tù tì quá 22 âm tiết mà không có dấu phẩy `,`.
-   - Cấu trúc nhịp thở chuẩn cho 1 câu trong beat: `Vế mở (8–12 chữ), vế phát triển (14–20 chữ), vế kết (12–18 chữ).` Dấu phẩy đặt đúng chỗ ngắt hơi tự nhiên giúp TTS tự động hạ giọng và nghỉ nhịp cực kỳ truyền cảm.
+2. **Kiểm soát độ dài vế câu theo nhịp thở (10 – 16 âm tiết/vế, 3–4 dấu phẩy/beat):**
+   - Mỗi beat (`50–65` âm tiết) chia thành `4–5` vế ngắn ngăn cách bởi `3–4` dấu phẩy `,` (mỗi vế dài **10–16 âm tiết**).
+   - Cấu trúc nhịp thở chuẩn cho 1 beat: `Vế 1 mở nhịp (8–14 âm tiết), vế 2–3 hành động cốt lõi (25–35 âm tiết chia 2–3 vế), vế cuối điểm nhấn cảm xúc (12–16 âm tiết).` Dấu phẩy đặt đúng chỗ ngắt hơi tự nhiên giúp TTS tự động hạ giọng và phụ đề `.srt` tách theo từng vế ngắn gọn.
 3. **Sử dụng "Phó từ chỉ đạo diễn xuất":**
    - Luôn gắn kèm phó từ miêu tả thái độ vào trước động từ để "tô màu" cảm xúc cho câu văn: *thản nhiên, hồn nhiên, tỉnh bơ, ngang nhiên, thẳng thừng, dứt khoát, lạnh lùng, điên cuồng, bàng hoàng, chết sững, nghẹn ngào, chua chát, lặng lẽ, âm thầm*.
 
@@ -469,26 +473,28 @@ flowchart TD
 
 ## 7. Xử lý hình ảnh, phụ đề, âm thanh
 
-### 7.1. Hình ảnh (mỗi đoạn cắt)
+### 7.1. Hình ảnh & Tùy chọn làm mờ phụ đề Trung (`BLUR_SUBS`)
 
 ```
 scale 1134x2016 (phóng 1,05x) → crop 1080x1920 chính giữa → fps 29.97 → (setpts nếu làm chậm)
 ```
 
 - **Phóng 1,05×**: lấp đầy khung 1080 (gốc 1078) và làm khung hình khác bản gốc một chút.
-- **Làm mờ phụ đề Trung vừa khít 2 chiều (`detect_all_seg_boxes`):** Với mỗi đoạn cắt `(a, b)`, thuật toán quét đa luồng tìm chính xác tọa độ hộp chữ tiếng Trung `[x, y, w, h]` xuất hiện trong đoạn đó (cao chỉ ~120–135 px thay vì 430 px, rộng vừa khít câu chữ, các cảnh không có thoại thì giữ nguyên không làm mờ) → dùng `boxblur` (không làm tối nền) ghép qua mặt nạ viền mềm 4 cạnh `band_mask_2d.png` (hoặc `band_mask_1d.png` khi câu thoại dài sát mép màn hình).
+- **Tùy chọn làm mờ phụ đề Trung (`BLUR_SUBS` trong `pipeline/assemble.py`):**
+  - Mặc định **`BLUR_SUBS = False`** (khi người dùng không yêu cầu che mờ sub Trung để giữ khung hình nét 100% và tăng tốc render).
+  - Khi người dùng yêu cầu che mờ sub Trung (**`BLUR_SUBS = True`**): thuật toán `detect_all_seg_boxes` tự động quét đa luồng tìm chính xác tọa độ hộp chữ 2D `[x, y, w, h]` kết hợp nội suy tọa độ dọc `interp_y` từ file `.srt` (cao chỉ ~110–135 px, rộng vừa khít câu chữ, các cảnh không có thoại giữ nguyên không làm mờ) → dùng `boxblur` ghép qua mặt nạ viền mềm 4 cạnh `band_mask_2d.png` (hoặc `band_mask_1d.png`).
 - Khóa đúng số khung hình (`-frames:v`) và dùng `tpad` để không bao giờ thiếu khung → toàn video không lệch tiếng/hình.
 
 ### 7.2. Phụ đề tiếng Việt (Tùy chọn `BURN_SUBS`)
 
 - Mặc định **`BURN_SUBS = False`** (không in đè phụ đề tiếng Việt và không chèn tiêu đề lên video để giữ khung hình sạch tuyệt đối, phục vụ hậu kỳ/đăng tải linh hoạt; file phụ đề rời vẫn được xuất ra `output/review_vi.srt` và `work/subs_vi.ass`).
-- Nếu muốn in cứng phụ đề tiếng Việt lên hình, chỉ cần đổi `BURN_SUBS = True` trong `assemble.py` rồi chạy `python pipeline\assemble.py final` (chỉ mất ~1 phút).
+- Nếu muốn in cứng phụ đề tiếng Việt lên hình, chỉ cần đổi `BURN_SUBS = True` trong `assemble.py` rồi chạy `python pipeline/assemble.py final` (chỉ mất ~1 phút).
 
-### 7.3. Âm thanh
+### 7.3. Âm thanh (`stage_audio` & `ORIG_VOL`)
 
-- **Giọng đọc**: ghép các wav theo đúng từng mẫu âm thanh (Python thuần, không qua ffmpeg) – mỗi beat được đệm/cắt khớp chính xác thời lượng beat → không cộng dồn sai số.
-- **Âm gốc của phim**: mặc định **`ORIG_VOL = 0.0`** (tắt hoàn toàn tiếng gốc của video, chỉ giữ 100% giọng đọc lồng tiếng Việt qua `acompressor` + `loudnorm` I = −15 LUFS, TP = −1,5 dB).
-- Mã hóa: H.264 NVENC (cq 20, tối đa 16 Mbps), AAC 192 kbps, `+faststart` để phát online nhanh.
+- **Xử lý giọng đọc đơn giản, tự nhiên:** chỉ cắt khoảng lặng đầu/cuối mỗi file TTS bằng `silenceremove` (`-48 dB`), ghép các câu thoại ngắn trong `INTRO_DUB` theo đúng khoảng nghỉ tự nhiên `post_pause_sec` (`0.20s – 0.60s`), và ghép các beat trong `BEATS` cách nhau `PAUSE = 0.14s` bằng Python thuần (`wave`, chính xác tới từng mẫu âm thanh 48 kHz). **Tuyệt đối không** nén khoảng nghỉ bên trong câu và **không** đổi tốc độ từng beat (`atempo`).
+- **Âm gốc của phim**: mặc định **`ORIG_VOL = 0.0`** (tắt hoàn toàn tiếng gốc của video ở phần thân Review, chỉ giữ 100% giọng đọc lồng tiếng Việt qua `acompressor` + `loudnorm` I = −15 LUFS, TP = −1,5 dB; riêng ở phần 30s mở màn `INTRO_DUB`, có thể giữ lại các tiếng động hiện trường đắt giá như tiếng tát, tiếng đập vỡ đồ qua tham số `sfx_lead_sec`).
+- Mã hóa phần cứng tự động: H.264 NVENC (`h264_nvenc` trên Windows) hoặc VideoToolbox (`h264_videotoolbox` trên macOS), AAC 192 kbps, `+faststart`.
 
 ---
 
@@ -496,20 +502,19 @@ scale 1134x2016 (phóng 1,05x) → crop 1080x1920 chính giữa → fps 29.97 �
 
 ### 8.1. Soát phát âm giọng đọc – `qa_tts.py`
 
-```powershell
-$env:PYTHONIOENCODING="utf-8"
-python pipeline\qa_tts.py 1 6 9 30 70 77 86 112
+```bash
+python -u pipeline/qa_tts.py 1 15 35 60 85 105 112
 ```
 
-Dùng Whisper `language="vi"` chuyển ngược giọng đọc thành chữ, so với kịch bản. Kết quả: khớp gần như hoàn toàn; khác biệt nhỏ: "Giai Giai" → "Dai Dai" (đúng cách đọc giọng Bắc), "nhát dao" → "nhắc giao" (lỗi nhận dạng, nghe vẫn rõ).
+Dùng Whisper `language="vi"` (tự động chọn CUDA trên Windows hoặc CPU `int8` trên macOS) chuyển ngược giọng đọc thành chữ, so với kịch bản để kiểm tra tên riêng Hán Việt và các con số.
 
 ### 8.2. Soát hình khớp lời – `qa_sheet.py`
 
-```powershell
-python pipeline\qa_sheet.py
+```bash
+python -u pipeline/qa_sheet.py
 ```
 
-Chụp **1 khung ở giữa mỗi beat** từ video thành phẩm (đã có phụ đề Việt), ghép 4 ảnh lưới trong `work/qa/`. Nhìn vào là thấy ngay câu nào đang chiếu sai cảnh.
+Đọc độ lệch thời gian mở màn `intro_dur` từ `work/intro_meta.json` (hoặc `start_sec` trong `work/plan.json`) và chụp **1 khung ở chính giữa mỗi beat** từ video thành phẩm `output/review_vi.mp4`, ghép thành các bảng ảnh lưới trong `work/qa/qa_*.jpg`. Nhìn vào là thấy ngay beat nào đang chiếu sai cảnh hoặc dính thẻ chữ.
 
 Các lỗi phát hiện ở vòng 1 và cách sửa:
 
@@ -533,47 +538,46 @@ tools\ffmpeg.exe -i output\review_vi.mp4 -af volumedetect -vn -f null -         
 ## 9. Cách sửa và xuất lại video
 
 ### Chỉ sửa hình (đổi cửa sổ thời gian của beat)
-1. Sửa phần `"m:ss-m:ss"` của beat trong `pipeline/script_beats.py`.
+1. Sửa phần `"h:mm:ss-h:mm:ss"` của beat trong `pipeline/script_beats.py`.
 2. Chạy:
-   ```powershell
-   cd pipeline
-   python -u assemble.py plan beats final
-   python qa_sheet.py          # xem lại work/qa/*.jpg
+   ```bash
+   python -u pipeline/assemble.py plan beats final
+   python -u pipeline/qa_sheet.py          # xem lại work/qa/*.jpg
    ```
 
-### Sửa lời bình
-1. Sửa câu trong `script_beats.py`.
-2. Tạo lại `work/tts/narration.srt` (đoạn code dưới), nạp lại vào app TTS bằng MCP (`load_input` → `start_tts`). Hoặc đơn giản hơn: dùng MCP `text_to_speech` cho riêng câu đó rồi chép file mp3 trả về đè lên `work/tts/narration/N.mp3`.
-   ```powershell
-   cd pipeline
-   python -c "from script_beats import BEATS; f=lambda s:f'{s//3600:02d}:{s%3600//60:02d}:{s%60:02d},000'; open(r'..\work\tts\narration.srt','w',encoding='utf-8').write('\n'.join(f'{i+1}\n{f(i*30)} --> {f(i*30+25)}\n{t}\n' for i,(_,t) in enumerate(BEATS)))"
+### Sửa lời bình hoặc câu thoại mở màn
+1. Sửa câu trong `INTRO_DUB` hoặc `BEATS` của `pipeline/script_beats.py`.
+2. Tạo lại `work/tts/narration.srt` bằng lệnh chuẩn (xuất đầy đủ `INTRO_DUB` nối tiếp `BEATS`), nạp lại vào app TTS bằng MCP (`load_input` → `start_tts`):
+   ```bash
+   python pipeline/assemble.py make_srt
    ```
-3. Chạy toàn bộ: `python -u assemble.py` (giai đoạn `audio` tự phát hiện mp3 mới hơn wav).
+   *(Hoặc nếu chỉ sửa 1 câu lẻ: dùng MCP `text_to_speech` cho riêng câu đó rồi chép file mp3 trả về đè lên `work/tts/narration/N.mp3`).*
+3. Chạy lại: `python -u pipeline/assemble.py audio plan beats final`.
 
-> Nếu **thêm/bớt beat**, số thứ tự file mp3 bị xê dịch → nên xóa `work/tts/narration/`, `work/aud/`, `work/beats/` rồi lồng tiếng và dựng lại toàn bộ.
+> Nếu **thêm/bớt câu trong `INTRO_DUB` hoặc `BEATS`**, số thứ tự file mp3 bị xê dịch → bắt buộc xóa `work/tts/narration/*.mp3` và `work/aud/*.wav` rồi lồng tiếng và dựng lại toàn bộ.
 
-### Đổi kiểu phụ đề / tiêu đề / âm lượng
-Sửa hằng số đầu `assemble.py` hoặc dòng `Style:` trong `build_ass()`, rồi chạy `python -u assemble.py final` (chỉ mất ~1 phút, không render lại các beat).
+### Đổi tùy chọn che sub (`BLUR_SUBS`) hoặc in phụ đề (`BURN_SUBS`)
+- Đổi `BLUR_SUBS = True/False` trong `pipeline/assemble.py` rồi chạy `python -u pipeline/assemble.py plan beats final`.
+- Đổi `BURN_SUBS = True/False` trong `pipeline/assemble.py` rồi chạy `python -u pipeline/assemble.py final` (chỉ mất ~30 giây, không cần render lại các beat).
 
 ---
 
 ## 10. Làm với một phim mới
 
-1. Đặt phim và phụ đề vào thư mục, sửa `SRC` trong các script (mặc định `1.mp4`, `1.srt`).
-2. Chạy lần lượt:
-   ```powershell
-   python pipeline\condense_srt.py
-   python -u pipeline\asr.py
-   python pipeline\shots.py
-   python pipeline\detect_subband.py      # → cập nhật BAND_Y, BAND_H trong assemble.py và SUB_Y0/SUB_Y1 trong overlay_text.py
-   python pipeline\contact_sheets.py
-   python -u pipeline\overlay_text.py
+1. Đặt file `.mp4` và `.srt` của tập mới vào thư mục `input/` (các script trong `pipeline/` tự động nhận diện `input/*.mp4` và `input/*.srt`, không cần sửa biến `SRC` thủ công).
+2. Chạy tiền xử lý (chạy song song để tối ưu tốc độ):
+   ```bash
+   python pipeline/condense_srt.py
+   python pipeline/detect_subband.py
+   # Chạy song song 3 tác vụ:
+   python -u pipeline/asr.py
+   python -u pipeline/shots.py
+   python -u pipeline/contact_sheets.py
+   # Sau khi shots.py xong:
+   python -u pipeline/overlay_text.py
    ```
-3. **Viết `script_beats.py`** (nhờ AI): đưa cho AI `work/srt_condensed.txt`, `work/asr.json` (hoặc đoạn bị thiếu), các ảnh `work/sheets/*.jpg`, cùng yêu cầu: lập bảng nhân vật Hán Việt → chuỗi nhân quả → viết beat theo [mục 5](#5-nguyên-tắc-viết-kịch-bản-cuốn-hút), mỗi beat kèm cửa sổ thời gian.
-   - Độ dài mục tiêu: **số âm tiết ≈ số phút mong muốn × 270** (ví dụ 14 phút ≈ 3800 âm tiết). Phim 2 tiếng → video ~20 phút ≈ 5400 âm tiết.
-4. Lồng tiếng qua MCP (Bước 7) → `python -u pipeline\assemble.py` → QA (Bước 10) → sửa → xuất lại.
-
-Nếu phim **khung ngang 16:9**: đổi `W, H = 1920, 1080`, đo lại dải phụ đề, chỉnh vị trí phụ đề trong `build_ass()`.
+3. **Viết `pipeline/script_beats.py`** gồm `INTRO_DUB` (~28–35 giây mở màn thoại gốc, `12–16` câu ngắn `4–15` âm tiết, không spoil kết quả) và `BEATS` (`112–120` beat Review Người Kể Chuyện, `~7.000–7.600` âm tiết, mỗi beat `50–65` âm tiết, cửa sổ thời gian trung vị `40–50s`, không vượt quá `85–90s`).
+4. Xuất `python pipeline/assemble.py make_srt` → Lồng tiếng qua MCP (`speed=1.08`, chờ `done == len(INTRO_DUB) + len(BEATS)`) → `python -u pipeline/assemble.py audio plan` (đảm bảo `slow: []`) → `python -u pipeline/assemble.py beats final` → QA (`qa_tts.py`, `qa_sheet.py`) → Xuất `output/youtube_seo.txt` → Dọn rác (`work/`, `pipeline/__pycache__/`, `input/*.mp4`, `input/*.srt`).
 
 ---
 
@@ -581,21 +585,27 @@ Nếu phim **khung ngang 16:9**: đổi `W, H = 1920, 1080`, đo lại dải ph�
 
 | Tham số (file) | Giá trị | Ý nghĩa |
 |---|---|---|
-| `PAUSE` (assemble) | 0.14 | Khoảng nghỉ giữa các beat (giây) |
+| `INTRO_DUB` (script_beats) | 28–35s, 3–6 khối, 12–16 câu | Mở màn lồng tiếng thoại gốc (4–15 âm tiết/câu, 0.8–3.0s/câu, không spoil kết quả) |
+| `post_pause_sec` (INTRO_DUB) | 0.20 – 0.60 | Khoảng nghỉ tự nhiên sau mỗi câu thoại ngắn ở phần 30s mở màn (giây) |
+| Chuyển cảnh sau Intro | 0.55 | Thời lượng khựng hình (Freeze Frame + Fade tối dần) trước khi vào Beat 1 (giây) |
+| `BEATS` (script_beats) | 112–120 beat, 7.000–7.600 âm tiết | Phần thân Review Người Kể Chuyện (50–65 âm tiết/beat, 4–5 vế, 3–4 dấu phẩy) |
+| Cửa sổ thời gian `spec` | Trung vị 40–50s (28–65s, ≤ 85–90s) | Độ rộng cửa sổ hình mỗi beat; từ Beat 3 trở đi chồng lấn (`overlap`) ≤ 8–10s |
+| `PAUSE` (assemble) | 0.14 | Khoảng nghỉ giữa các beat trong `BEATS` (giây) |
 | `seg_max` (choose) | 3.6 | Độ dài tối đa một đoạn hình (giây) |
 | `min_len` (pieces_for) | 1.0 | Bỏ mảnh cú máy ngắn hơn (giây) |
-| Tốc độ làm chậm tối thiểu | 0.62 | Khi cảnh nguồn ngắn hơn giọng đọc |
-| `ORIG_VOL` | 0.13 | Âm lượng âm gốc dưới giọng đọc |
-| `ZOOM` | 1.05 | Phóng to khung hình |
-| `BAND_Y`, `BAND_H` | 1215, 430 | Dải làm mờ phụ đề Trung (tọa độ sau khi phóng) |
-| Vùng né "未完待续" | −1.6 s / +1.2 s | Quanh mỗi dòng thẻ "còn tiếp" trong SRT |
-| Ngưỡng chữ overlay (overlay_text / stage_plan) | 1500 | Điểm ≥ 1500 ⇒ cú máy có chữ |
-| Khoảng lặng TTS | −48 dB | Ngưỡng cắt khoảng lặng đầu/cuối giọng đọc |
-| Phụ đề | Roboto Bold 64, viền 5, ≤ 58 ký tự/cụm, ≤ 30 ký tự/dòng | |
-| Mã hóa beat | NVENC p5, cq 19 | Chất lượng trung gian |
-| Mã hóa cuối | NVENC p6, cq 20, maxrate 16M, AAC 192k | |
+| Tốc độ làm chậm tối thiểu | 0.62 | Khi cảnh nguồn ngắn hơn giọng đọc (mục tiêu luôn là `slow: []`) |
+| `ORIG_VOL` (assemble) | 0.0 | Mặc định tắt tiếng gốc ở phần Review (giữ tiếng hiện trường ở Intro qua `sfx_lead_sec`) |
+| `BURN_SUBS` (assemble) | False | Mặc định không in đè phụ đề Việt lên hình (xuất rời `output/review_vi.srt`) |
+| `BLUR_SUBS` (assemble) | False (hoặc True khi cần) | Tùy chọn làm mờ hộp phụ đề Trung 2D vừa khít từng câu thoại |
+| `ZOOM` (assemble) | 1.05 | Phóng to khung hình |
+| `BAND_Y`, `BAND_H` | Tự động từ `video_meta.json` | Dải phụ đề Trung (tự động nhận diện theo video 9:16 hoặc 16:9) |
+| Vùng né "未完待续 / 完结" | −1.6 s / +1.2 s | Quanh mỗi dòng thẻ "còn tiếp / kết thúc" trong SRT |
+| Ngưỡng chữ overlay | 1500 | Điểm ≥ 1500 ⇒ cú máy có chữ nổi bên ngoài vùng sub |
+| Khoảng lặng TTS | −48 dB | Ngưỡng cắt khoảng lặng đầu/cuối giọng đọc (`silenceremove`) |
+| Phụ đề rời / ASS | Roboto Bold 64 (dọc) / 48 (ngang) | ≤ 58 ký tự/cụm, ≤ 30 ký tự/dòng (dọc) hoặc ≤ 82 ký tự/cụm, ≤ 44 ký tự/dòng (ngang) |
+| Mã hóa phần cứng | `h264_nvenc` (Win) / `h264_videotoolbox` (Mac) | Tự động chọn theo hệ điều hành, AAC 192k, 48 kHz |
 | Chuẩn âm lượng | loudnorm I = −15, TP = −1.5 | |
-| TTS | giọng `viet_review_dt6Rssa4`, `speech-02-hd`, speed 1.1 khi chạy | Tốc độ đã trả về 1.0 sau khi xong |
+| TTS | `viet_rv_v2_dt6uCxVe` (`tools/voice_sample_v2.mp3`), `speech-02-hd`, `speed = 1.0` | Giữ nguyên tốc độ tự nhiên `1.0`, không can thiệp `atempo` |
 
 ---
 
@@ -649,54 +659,54 @@ Khi một cảnh hồi tưởng ngắn (ví dụ 5 giây cảnh rơi xuống nư
 
 ## 13. Cẩm nang tuỳ biến cho mọi thể loại phim (Playbook)
 
-Khi áp dụng công cụ này cho các bộ phim thuộc thể loại khác nhau, hãy điều chỉnh **chiến thuật viết kịch bản, nhịp cắt và tham số âm thanh** theo bảng hướng dẫn dưới đây:
+Khi áp dụng công cụ này cho các bộ phim thuộc thể loại khác nhau, hãy điều chỉnh **chiến thuật chọn cảnh mở màn 30s (`INTRO_DUB`) và cách dẫn chuyện (`BEATS`)** theo hướng dẫn dưới đây:
 
 ### 13.1. Phim Ngôn tình / Tổng tài / Báo thù / Drama Gia đình (Short Drama Trung – Hàn)
 - **Đặc điểm nguồn:** Nhiều tập ngắn ghép lại, nhịp thoại dồn dập, xung đột xoay quanh phản bội, mạo danh, hiểu lầm, trọng nam khinh nữ hoặc trả thù.
-- **Cách mở bài (Hook 30–40s):** Chọn ngay tình huống vô lý/ức chế đỉnh điểm ở đầu phim + hé lộ cú lật thân phận ở giữa/cuối phim dưới dạng câu hỏi bỏ ngỏ.
-- **Cách dẫn chuyện:** Nhấn mạnh sự tỉnh táo, dứt khoát của nhân vật chính ("cắt lỗ kịp thời") và sự trơ trẽn, ảo tưởng của phe phản diện. Tuyệt đối không dịch từng câu cãi vã dài dòng ở các màn đấu khẩu 10 phút mà gom thành từng luận điểm đanh thép (mỗi beat 1 đòn phản kích).
-- **Tham số đề xuất:** `speed = 1.08`, `ORIG_VOL = 0.13`, `seg_max = 3.6`.
+- **Cách mở màn 30s (`INTRO_DUB` – Cấm Spoil Kết Quả):** Chọn phân cảnh **cay nghiệt, ức chế đỉnh điểm** (kẻ bội bạc chà đạp chân tình, tiểu tam ngông cuồng sỉ nhục, kỷ vật bị vứt bỏ...) hoặc cảnh đối đầu đang ở thế ngàn cân treo sợi tóc trước khi lật kèo; tách thành `12–16` câu ngắn (`4–15` âm tiết/câu, `post_pause_sec` `0.20–0.60s`). Beat 1–2 nối tiếp mở vòng lặp tò mò dẫn về đầu phim mà không lộ kết cục.
+- **Cách dẫn chuyện:** Nhấn mạnh sự tỉnh táo, dứt khoát của nhân vật chính ("cắt lỗ kịp thời") và sự trơ trẽn, ảo tưởng của phe phản diện. Tuyệt đối không dịch từng câu cãi vã dài dòng ở các màn đấu khẩu 10–15 phút mà gom thành từng luận điểm đanh thép (mỗi beat 1 đòn phản kích).
+- **Tham số chuẩn:** `speed = 1.08`, `PAUSE = 0.14`, `ORIG_VOL = 0.0` (giữ tiếng tát/đập vỡ ở 30s đầu qua `sfx_lead_sec`), `seg_max = 3.6`.
 
 ### 13.2. Phim Trinh thám / Hình sự / Tâm lý Tội phạm / Giật gân (Mystery / Thriller)
 - **Đặc điểm nguồn:** Có vụ án, điều tra, nhiều nghi phạm, manh mối cài cắm và cú twist hung thủ ở cuối phim.
-- **Cách mở bài (Hook):** Mô tả hiện trường vụ án kỳ bí nhất hoặc nghịch lý không lời giải (ví dụ: căn phòng khóa kín, chứng cứ ngoại phạm hoàn hảo), đặt câu hỏi *"Rốt cuộc kẻ sát nhân đã biến mất bằng cách nào?"*.
+- **Cách mở màn 30s (`INTRO_DUB`):** Cắt đoạn thoại chất vấn căng thẳng nhất tại hiện trường vụ án kỳ bí hoặc nghịch lý không lời giải (căn phòng khóa kín, chứng cứ ngoại phạm hoàn hảo), dừng ngay ở câu hỏi bỏ lửng *"Rốt cuộc kẻ sát nhân đã biến mất bằng cách nào?"*.
 - **Nguyên tắc kiểm soát thông tin (Information Control):**
-  - **Tuyệt đối không lộ hung thủ thật ở phần Hook** (khác với phim drama có thể nhá hàng cú lật).
+  - **Tuyệt đối không lộ hung thủ thật ở phần mở màn**.
   - Kể theo đúng góc nhìn của người điều tra: khi nhân vật phát hiện manh mối nào thì người kể chuyện mới lật mở manh mối đó.
   - Chú ý gài các chi tiết nhỏ (vết bùn trên giày, chiếc đồng hồ chạy sai giờ, câu nói vô tình) ở Hồi 1–2 để khi lật mặt ở Hồi cuối người xem vỡ òa.
 - **Từ vựng chủ đạo:** *Kỳ lạ thay, Một chi tiết nhỏ đã lọt vào mắt xanh của vị thám tử, Tưởng chừng vụ án đã khép lại nhưng, Sự thật ẩn sau lớp mặt nạ...*
-- **Tham số đề xuất:** `speed = 1.05` (đọc trầm, rõ, có độ căng), `PAUSE = 0.18` (tăng nhẹ khoảng nghỉ giữa các beat để tạo sự hồi hộp), `ORIG_VOL = 0.15`.
+- **Tham số chuẩn:** `speed = 1.08`, `PAUSE = 0.14`, `ORIG_VOL = 0.0`.
 
 ### 13.3. Phim Hành động / Sinh tồn / Khoa học Viễn tưởng / Trò chơi Tử thần (Action / Survival / Sci-Fi)
 - **Đặc điểm nguồn:** Ít thoại, nhiều cảnh hành động, rượt đuổi, giải đố sinh tồn hoặc kỹ xảo.
 - **Cách xử lý khi SRT ít thoại:** Ở thể loại này, phụ đề gốc chỉ chiếm 30% thông tin; **70% nằm ở hình ảnh (`work/sheets/*.jpg`)**. Phải xem kỹ các tấm contact sheet để mô tả hành động, chiến thuật và sự thông minh của nhân vật chính.
-- **Cách mở bài (Hook):** Giới thiệu ngay **Luật chơi / Bối cảnh sinh tồn khắc nghiệt** trong 30 giây đầu và khoảnh khắc nhân vật đứng giữa ranh giới sinh tử.
+- **Cách mở màn 30s (`INTRO_DUB`):** Chọn đoạn công bố **Luật chơi / Bối cảnh sinh tồn khắc nghiệt** và khoảnh khắc nhân vật đứng giữa ranh giới sinh tử (giữ âm thanh hiện trường đầu cảnh qua `sfx_lead_sec`).
 - **Cách dẫn chuyện:** Dùng câu ngắn, động từ mạnh (*lao vút, khóa chặt, bật ngược, tận dụng sơ hở*). Lược bỏ các cảnh đánh đấm phụ, chỉ giữ các pha bước ngoặt mà nhân vật dùng mưu trí để lật ngược thế cờ.
-- **Tham số đề xuất:** `speed = 1.10` (nhịp nhanh, gấp gáp), `seg_max = 2.8` (đổi cảnh nhanh hơn), `ORIG_VOL = 0.16` (giữ tiếng súng, tiếng động cơ, âm thanh kịch tính).
+- **Tham số chuẩn:** `speed = 1.08`, `PAUSE = 0.14`, `ORIG_VOL = 0.0` (dùng `sfx_lead_sec` cho tiếng động hiện trường ở phần 30s mở màn).
 
 ### 13.4. Phim Kinh dị / Tâm linh / Dân gian (Horror / Folklore)
 - **Đặc điểm nguồn:** Khung hình tối, nhịp phim chậm ở đầu, có các quy tắc cấm kỵ (taboo) và yếu tố siêu nhiên/nhân quả.
-- **Cách mở bài (Hook):** Nêu ngay **Điều cấm kỵ của ngôi làng / căn nhà** và hành động phạm cấm của nhân vật.
+- **Cách mở màn 30s (`INTRO_DUB`):** Chọn đoạn thoại cảnh báo về **Điều cấm kỵ của ngôi làng / căn nhà** và khoảnh khắc nhân vật phạm cấm.
 - **Cách dẫn chuyện:** Giọng văn kể chuyện đêm khuya, giàu tính gợi hình (*giữa màn đêm tĩnh mịch, tiếng gõ cửa khô khốc vang lên, bóng người đứng bất động dưới ánh đèn vàng vọt*).
-- **Tham số đề xuất:** `speed = 1.02–1.05`, `PAUSE = 0.20`, `ORIG_VOL = 0.16`. Với phim có tông màu tối, khi làm mờ phụ đề (`assemble.py`), có thể chỉnh `brightness=-0.05` thay vì `-0.10` để dải mờ tiệp hoàn toàn vào nền tối.
+- **Tham số chuẩn:** `speed = 1.08`, `PAUSE = 0.14`, `ORIG_VOL = 0.0`.
 
 ### 13.5. Phim Cổ trang / Tiên hiệp / Cung đấu / Kiếm hiệp (Historical / Wuxia / Xianxia)
 - **Đặc điểm nguồn:** Nhiều nhân vật, tên chức tước/chiêu thức/cảnh giới phức tạp.
 - **Cách xử lý tên gọi & thuật ngữ:**
   - Bắt buộc dịch toàn bộ tên người, tên địa danh, tước vị sang **Hán Việt chuẩn** (ví dụ: *Tể tướng, Hoàng hậu, Thái tử, Trưởng lão, Thanh Vân Tông*) – tuyệt đối không để phiên âm Pinyin (*Zongzhu, Shifu*).
-  - **Cắt tỉa nhân vật phụ:** Phim cổ trang thường có 15–20 nhân vật; khi viết review 20 phút, chỉ giữ tên riêng cho **tối đa 5–6 nhân vật cốt lõi**, các nhân vật còn lại gọi bằng danh từ chung (*vị thái y, gã cận vệ, vị trưởng lão áo đen, ả thị tỳ*) để người nghe không bị loạn tên.
-- **Tham số đề xuất:** `speed = 1.06–1.08`, dùng từ ngữ trang trọng, giàu màu sắc cổ phong (*nơi thâm cung hiểm ác, mối huyết thù năm xưa, phế bỏ tu vi, một bước lên mây*).
+  - **Cắt tỉa nhân vật phụ:** Phim cổ trang thường có 15–20 nhân vật; khi viết review, chỉ giữ tên riêng cho **tối đa 5–6 nhân vật cốt lõi**, các nhân vật còn lại gọi bằng danh từ chung (*vị thái y, gã cận vệ, vị trưởng lão áo đen, ả thị tỳ*) để người nghe không bị loạn tên.
+- **Tham số chuẩn:** `speed = 1.08`, dùng từ ngữ trang trọng, giàu màu sắc cổ phong (*nơi thâm cung hiểm ác, mối huyết thù năm xưa, phế bỏ tu vi, một bước lên mây*).
 
 ### 13.6. Đặc trị Phim Trung Quốc: Xuyên Không / Trọng Sinh / Hệ Thống / Đọc Tâm (Transmigration / Rebirth / System)
 Đây là dòng phim chủ lực của phim ngắn & web-drama Trung Quốc, có 4 đặc thù cần xử lý đúng cách để người xem không bị rối:
 
-1. **Neo rõ "Hai Kiếp / Hai Thế Giới" ngay trong 3 Beat đầu tiên:**
-   - Phim trọng sinh (sống lại) hoặc xuyên sách (xuyên vào tiểu thuyết) thường mở màn bằng cảnh nhân vật chính bị hại chết ở kiếp trước rồi mở mắt tỉnh dậy ở thời điểm quá khứ, hoặc đang ở hiện đại thì xuyên vào thân xác một nhân vật phụ pháo hôi.
-   - **Cách dẫn chuyện chuẩn:** Phải dùng từ khóa định vị thời không thật rõ ràng (*"Ở kiếp trước, chỉ vì mù quáng tin lời gã tra nam mà cô phải bỏ mạng nơi ngục tối. Thế nhưng ông trời có mắt, khi mở mắt ra lần nữa, cô phát hiện mình đã sống lại vào đúng ngày..."* hoặc *"Vừa mở mắt ra, cô gái hiện đại bàng hoàng nhận ra mình đã xuyên vào cuốn tiểu thuyết ngược tâm, lại còn trúng ngay vai ác nữ sắp bị cả gia tộc xử tử..."*).
+1. **Neo rõ "Hai Kiếp / Hai Thế Giới" ngay trong các Beat đầu tiên:**
+   - Phim trọng sinh (sống lại) hoặc xuyên sách/thông thiên thường mở màn bằng bi kịch tột cùng rồi mở ra cơ hội nghịch thiên cải mệnh.
+   - **Cách dẫn chuyện chuẩn:** Dùng từ khóa định vị thời không thật rõ ràng (*"Ở kiếp trước, chỉ vì mù quáng tin lời gã tra nam mà cô phải bỏ mạng nơi ngục tối, thế nhưng khi mở mắt ra lần nữa..."* hoặc *"Ngay phía sau bức bình phong sơn thủy nơi lãnh cung tăm tối ấy, một cánh cổng thời không kỳ diệu kết nối thẳng tới tiệm ăn hiện đại..."*).
 2. **Phân biệt "Lời nói ngoài miệng" và "Tiếng lòng / Âm thanh Hệ thống" trong SRT:**
    - Trong phim xuyên không / đọc tâm (读心术) hoặc có Hệ thống (系统), file `.srt` gốc ghi lẫn lộn cả câu nhân vật nói ra miệng lẫn câu nhân vật đang nghĩ thầm trong bụng (hoặc tiếng máy báo của Hệ thống).
    - **Cách dẫn chuyện chuẩn:** Luôn dẫn rõ trạng thái để tạo sự hài hước và kịch tính:
-     - *Ví dụ Đọc tâm:* *"Ngoài mặt cô nàng vẫn giữ vẻ ngoan ngoãn vâng dạ, nhưng trong lòng lại thầm mắng tên vương gia trước mặt là kẻ mù mắt mới đi tin lời ả bạch liên hoa kia. Trớ trêu thay, cô chẳng hề biết rằng toàn bộ tiếng lòng ấy đều đã lọt hết vào tai những người xung quanh."*
+     - *Ví dụ Đọc tâm:* *"Ngoài mặt cô nàng vẫn giữ vẻ ngoan ngoãn vâng dạ, nhưng trong lòng lại thầm mắng tên vương gia trước mặt là kẻ mù mắt mới đi tin lời ả bạch liên hoa kia, mà chẳng hề biết rằng toàn bộ tiếng lòng ấy đều đã lọt hết vào tai những người xung quanh."*
      - *Ví dụ Hệ thống:* *"Đúng lúc ngàn cân treo sợi tóc, âm thanh cơ giới của hệ thống bất ngờ vang lên trong đầu, giao cho cô nhiệm vụ vả mặt kẻ phản diện để đổi lấy phần thưởng cứu mạng."*
 3. **Việt hóa mượt mà các thuật ngữ mạng Trung Quốc (Slang chuyển thành văn kể chuyện):**
    - Không dịch cứng các từ lóng khó hiểu với người xem phổ thông:
@@ -706,63 +716,58 @@ Khi áp dụng công cụ này cho các bộ phim thuộc thể loại khác nha
      - `舔狗 (Thiểm cẩu)` → *kẻ si tình mù quáng / kẻ lụy tình bất chấp tự trọng*.
      - `打脸 (Đả kiểm)` → *màn vả mặt cực gắt / đòn phản kích khiến đối phương cứng họng*.
 4. **Xử lý chênh lệch bối cảnh Cổ đại – Hiện đại:**
-   - Khi nhân vật dùng kiến thức hiện đại (y thuật, kinh doanh, hóa học, tâm lý) để giải quyết rắc rối thời cổ đại/thập niên 80, hãy nhấn mạnh sự kinh ngạc của người xung quanh để tạo cảm giác "sảng văn" (thỏa mãn cho người xem).
+   - Khi nhân vật dùng kiến thức/vật tư hiện đại để giải quyết rắc rối thời cổ đại, hãy nhấn mạnh sự kinh ngạc của người xung quanh để tạo cảm giác "sảng văn" (thỏa mãn cho người xem).
 
-### 13.7. Cơ chế Tự động thích ứng Khung ngang (16:9) và Khung dọc (9:16)
+### 13.7. Cơ chế Tự động thích ứng Khung ngang (16:9), Khung dọc (9:16) & Tùy chọn Che Sub (`BLUR_SUBS`)
 Bộ code trong `pipeline/` đã được nâng cấp để **tự động nhận diện cả video dọc (`9:16`) lẫn video ngang (`16:9`)** mà không cần sửa code tay:
-1. Khi chạy `python pipeline\detect_subband.py`, script tự động kiểm tra kích thước thật của `1.mp4` (`src_w`, `src_h`), dò tìm vị trí phụ đề Trung ở nửa dưới khung hình, tự tạo mặt nạ viền mềm `work/band_mask.png` đúng kích thước và xuất cấu hình ra `work/video_meta.json`.
+1. Khi chạy `python pipeline/detect_subband.py`, script tự động kiểm tra kích thước thật của `input/*.mp4` (`src_w`, `src_h`), dò tìm vị trí phụ đề Trung ở nửa dưới khung hình, tự tạo mặt nạ viền mềm `work/band_mask.png` đúng kích thước và xuất cấu hình ra `work/video_meta.json`.
 2. Các script `contact_sheets.py`, `overlay_text.py`, `assemble.py` và `qa_sheet.py` tự động đọc `work/video_meta.json`:
    - **Nếu video dọc (`9:16`):** Xuất `1080×1920`, cỡ chữ phụ đề `64`, tối đa `30` ký tự/dòng (`58` ký tự/cụm).
    - **Nếu video ngang (`16:9`):** Xuất `1920×1080`, cỡ chữ phụ đề `48`, tối đa `44` ký tự/dòng (`82` ký tự/cụm), ảnh lưới QA tự xoay sang khung ngang `320×180`.
-   - **Nếu video gốc sạch (không có sub cứng):** Tự động tắt bộ lọc làm mờ `boxblur` để giữ nguyên 100% độ nét gốc.
+   - **Tùy chọn làm mờ sub (`BLUR_SUBS` trong `assemble.py`):** Mặc định `BLUR_SUBS = False` (giữ nguyên độ nét gốc 100%); khi người dùng yêu cầu che mờ sub Trung thì đặt `BLUR_SUBS = True` để kích hoạt bộ lọc làm mờ 2D vừa khít từng câu thoại (`detect_all_seg_boxes`).
 
 ---
 
-## 14. Checklist kiểm duyệt 10 điểm & Prompt mẫu tái sử dụng
+## 14. Checklist kiểm duyệt 11 điểm & Prompt mẫu tái sử dụng
 
-### 14.1. Checklist 10 điểm bắt buộc trước khi bàn giao video
+### 14.1. Checklist 11 điểm bắt buộc trước khi bàn giao video
 
-Mỗi khi hoàn thành một bộ phim mới, luôn chạy qua 10 bước kiểm tra này:
+Mỗi khi hoàn thành một bộ phim mới, luôn chạy qua 11 bước kiểm tra này:
 
-1. **[ ] Kiểm tra ký tự cấm trong `script_beats.py`:** Chạy lệnh kiểm tra tự động đảm bảo **0 dấu hai chấm (`:`), 0 chữ số (`0-9`), 0 ngoặc kép (`"`)** trong toàn bộ lời dẫn:
-   ```powershell
-   $env:PYTHONIOENCODING="utf-8"
-   python -c "import sys,re; sys.path.insert(0,'pipeline'); from script_beats import BEATS; print([i+1 for i,(_,t) in enumerate(BEATS) if re.search(r'[:;0-9\"\'()]',t)])"
+1. **[ ] Kiểm tra ký tự cấm, độ dài và cửa sổ thời gian trong `script_beats.py`:** Chạy lệnh kiểm tra tự động đảm bảo **0 ký tự cấm** (`:`, `;`, `0-9`, `"`, `'`, `()`, chữ Hán) trong cả `INTRO_DUB` và `BEATS`, tổng âm tiết đạt `7.000–7.600`, không có cửa sổ nào `> 85–90s` và không có `overlap > 10s` từ Beat 3 trở đi:
+   ```bash
+   python -c "import sys,re; sys.path.insert(0,'pipeline'); import script_beats as sb; intro=getattr(sb,'INTRO_DUB',[]); beats=sb.BEATS; bad_i=[i+1 for i,x in enumerate(intro) if re.search(r'[:;0-9\x22\x27()\u4e00-\u9fff]', x[4])]; bad_b=[i+1 for i,(_,t) in enumerate(beats) if re.search(r'[:;0-9\x22\x27()\u4e00-\u9fff]', t)]; print('intro_lines:', len(intro), 'beats:', len(beats), 'syllables:', sum(len(t.split()) for _,t in beats), 'bad_intro:', bad_i, 'bad_beats:', bad_b)"
    ```
-   *(Kết quả in ra phải là `[]`)*.
-2. **[ ] Kiểm tra ngôi kể (Storyteller Voice):** Đọc lướt toàn bộ kịch bản, đảm bảo không có bất kỳ câu nào xưng *"tôi / mình / cậu / anh / em / con"* theo kiểu nhập vai nhân vật.
-3. **[ ] Kiểm tra độ dài cửa sổ hình so với lời đọc:** Đảm bảo mọi beat đều có đủ cảnh sạch (`beats with slow-motion fill: []` khi chạy `assemble.py plan`).
+   *(Kết quả `bad_intro` và `bad_beats` bắt buộc phải là `[]`)*.
+2. **[ ] Kiểm tra `INTRO_DUB` (Không Spoil Kết Quả) & Ngôi kể `BEATS` (Storyteller Voice):** Đảm bảo 30s đầu là cảnh cay nghiệt/gay cấn bỏ lửng trước khi lật kèo (không lộ kết cục cuối phim), mỗi câu ngắn tách thành 1 dòng riêng (`post_pause_sec` `0.20–0.60s`), và phần `BEATS` giữ vững ngôi thứ ba (không nhảy ngôi thứ nhất/thứ hai đối thoại trực tiếp).
+3. **[ ] Kiểm tra độ dài cửa sổ hình so với lời đọc:** Đảm bảo mọi beat đều có đủ cảnh sạch (`beats with slow-motion fill: []` khi chạy `assemble.py audio plan`).
 4. **[ ] Xóa cache âm thanh cũ trước khi chạy TTS:** Xóa sạch `work/tts/narration/*.mp3` và `work/aud/*.wav` trước khi gọi MCP `start_tts`.
-5. **[ ] Nạp file `.srt` (không nạp `.txt`) vào MCP TTS:** Đảm bảo `total_lines == done == len(BEATS)` và `short_lines == []`.
+5. **[ ] Xuất `.srt` qua `python pipeline/assemble.py make_srt` (tuyệt đối không nạp `.txt`) vào MCP TTS:** Đảm bảo `total_lines == done == len(INTRO_DUB) + len(BEATS)` và `short_lines == []`.
 6. **[ ] Trả tốc độ TTS về mặc định (`1.0`) sau khi chạy xong:** Gọi `set_tts_settings(change_speed=False, speed=1.0)`.
-7. **[ ] Soát lỗi phát âm ngược (`qa_tts.py`):** Chạy Whisper tiếng Việt trên 8–10 beat ngẫu nhiên để chắc chắn tên riêng Hán Việt và các con số được đọc rõ ràng.
-8. **[ ] Soát bảng ảnh QA (`qa_sheet.py`):** Mở xem trực tiếp tất cả các ảnh `work/qa/qa_*.jpg` để chắc chắn **100% khung hình khớp với nội dung câu chuyện đang kể** (không dính thẻ tên nhân vật, không nhầm cảnh hồi tưởng, không dính chữ "未完待续").
-9. **[ ] Xuất kèm file `.srt` và `.txt` sạch sẽ:** Khi xuất `output/review_vi.srt` từ `work/subs_vi.ass`, đảm bảo đã thay ký tự xuống dòng `\N` của ASS thành `\n` chuẩn SRT.
-10. **[ ] Kiểm tra thông số file `output/review_vi.mp4`:** Có đủ luồng H.264 + AAC 48kHz, âm lượng chuẩn hóa khoảng `-15 LUFS`, hình và tiếng đồng bộ từ giây đầu đến giây cuối.
-11. **[ ] Dọn sạch toàn bộ dữ liệu tạm sau khi hoàn thành:** Sau khi đã kiểm tra xong thành phẩm trong `output/`, xóa sạch `work/`, `pipeline/__pycache__/` và file `.mp4` + `.srt` trong `input/` (chỉ giữ lại `output/` cùng bộ code Core và thư mục `input/` trống để sẵn sàng cho tập tiếp theo).
+7. **[ ] Soát lỗi phát âm ngược (`qa_tts.py`):** Chạy Whisper tiếng Việt trên 7–8 beat mẫu để chắc chắn tên riêng Hán Việt và các con số được đọc rõ ràng.
+8. **[ ] Soát bảng ảnh QA (`qa_sheet.py`):** Mở xem trực tiếp tất cả các ảnh `work/qa/qa_*.jpg` (đã tự động cộng độ lệch `intro_dur` từ `work/intro_meta.json`) để chắc chắn **100% khung hình khớp với nội dung câu chuyện đang kể** (không dính thẻ tên nhân vật, không nhầm cảnh hồi tưởng, không dính chữ "未完待续").
+9. **[ ] Xuất kèm file `output/review_vi.srt`, `output/kich_ban_review.txt` và `output/youtube_seo.txt`:** Chapters trong `youtube_seo.txt` tính chính xác theo trường `start_sec` trong `work/plan.json` (đã cộng `intro_dur`).
+10. **[ ] Kiểm tra thông số file `output/review_vi.mp4`:** Có đủ luồng H.264 + AAC 48kHz, âm lượng chuẩn hóa khoảng `-15 LUFS`, hình và tiếng đồng bộ từ giây đầu (30s Cold Open + 0.55s Freeze Frame) đến giây cuối.
+11. **[ ] Dọn sạch toàn bộ dữ liệu tạm sau khi hoàn thành:** Sau khi đã kiểm tra xong thành phẩm trong `output/`, xóa sạch `work/`, `pipeline/__pycache__/` và file `.mp4` + `.srt` trong `input/` (giữ lại `input/.gitkeep`).
 
 ### 14.2. Prompt mẫu (Master Prompt) để giao việc cho AI ở các bộ phim tiếp theo
 
-Lần tới khi có một bộ phim mới (bất kể thể loại nào), bạn chỉ cần bỏ file video và phụ đề vào thư mục, sau đó gửi câu lệnh sau cho AI:
+Lần tới khi có một bộ phim mới, bạn chỉ cần bỏ file `.mp4` và `.srt` vào thư mục `input/`, sau đó nhắn ngắn gọn cho AI (bởi file `AGENTS.md` đã tự động nạp toàn bộ quy tắc):
 
 > **Prompt mẫu:**
-> *"Hãy đọc kỹ toàn bộ file `README.md` (đặc biệt là Mục 5, 13 và 14) và thực hiện quy trình tạo video review tiếng Việt hoàn chỉnh cho bộ phim mới trong thư mục. Yêu cầu bắt buộc:*
-> *1. Chạy đầy đủ các bước tiền xử lý (rút gọn SRT, chạy Whisper lấp khoảng trống nếu thiếu thoại, tách cú máy, tìm dải sub cứng, xuất contact sheets và lọc cảnh dính chữ overlay).*
-> *2. Viết kịch bản trong `pipeline/script_beats.py` với thời lượng mục tiêu khoảng 20 phút (~5500–6000 âm tiết) theo đúng **Phong cách Người Kể Chuyện (Storyteller)**: tuyệt đối không dùng dấu hai chấm trích thoại trực tiếp, không nhảy ngôi xưng hô (tôi/anh/em/mình/cậu), viết số bằng chữ, dẫn dắt tâm lý và cảm xúc tự nhiên, cuốn hút.*
-> *3. Kết nối MCP `dgt-auto-tts` để lồng tiếng toàn bộ các beat, dựng video qua `assemble.py` đảm bảo không có beat nào bị slow-motion (`slow: []`), và kiểm tra kỹ bằng `qa_tts.py` + `qa_sheet.py` trước khi bàn giao `output/review_vi.mp4`, `output/review_vi.srt` và `output/kich_ban_review.txt`."*
+> *"Xử lý tập mới trong `input/` giúp tôi nhé (không cần che mờ sub). Hãy tuân thủ đầy đủ quy trình trong `AGENTS.md` và `README.md`: làm 30s mở màn thoại gốc `INTRO_DUB` cay nghiệt/kịch tính (tách từng câu ngắn có ngắt nghỉ tự nhiên, tuyệt đối không spoil kết quả cuối phim) + `0.55s` chuyển cảnh + `112–120` beat Review Người Kể Chuyện (`~7.000–7.600` âm tiết), lồng tiếng qua MCP `dgt-auto-tts`, kiểm tra QA (`slow: []`, `qa_tts.py`, `qa_sheet.py`), xuất bộ SEO YouTube và dọn rác sau khi hoàn tất."*
 
 ---
 
-## Tóm tắt thời gian thực hiện (máy RTX 4080)
+## Tóm tắt thời gian thực hiện
 
-| Bước | Phim 65 phút (Thực tế) | Phim 2 tiếng / 120 phút (Ước tính) | Ghi chú tối ưu |
+| Bước | Phim 65–120 phút | Phim dài 2–4 tiếng | Ghi chú tối ưu |
 |---|---|---|---|
-| Rút gọn SRT + Tìm vùng sub cứng | ~20 giây | ~30 giây | Lấy mẫu 400 khung hình |
-| Whisper toàn phim (GPU) | ~4,5 phút | ~8–9 phút | **Còn 0–2 phút** nếu SRT gốc đã đầy đủ |
-| Tách cú máy (CPU) | ~6,5 phút | ~11–12 phút | Chạy **song song** cùng lúc với Whisper |
-| Ảnh tổng quan + quét chữ overlay | ~3 phút | ~5–6 phút | |
-| Viết kịch bản Người Kể Chuyện (AI) | ~10 phút | ~10–12 phút | Đầu ra giữ nguyên ~20 phút (~115 beat) |
-| Lồng tiếng 112–120 beat qua MCP | ~4 phút | ~4–4,5 phút | Không phụ thuộc độ dài phim gốc |
-| Render các beat + bản cuối (20 phút) | ~3,5 phút | ~3,5–4 phút | Sửa lẻ chỉ mất ~1 phút nhờ cache `.sig` |
-| **Tổng (chạy tuần tự)** | **~32–35 phút** | **~45–50 phút** | |
-| **Tổng (chạy song song CPU + GPU)** | **~25 phút** | **~30–35 phút** | Khuyên dùng |
+| Rút gọn SRT + Tìm vùng sub cứng | ~20–30 giây | ~30–40 giây | Lấy mẫu 400 khung hình |
+| Whisper khoảng trống SRT > 40s (`asr.py`) | ~0–2 phút | ~2–3,5 phút | Chạy **song song** cùng `shots.py` & `contact_sheets.py` |
+| Tách cú máy đa luồng 8 nhân (`shots.py`) | ~2–3 phút | ~4–6 phút | `ProcessPoolExecutor(8)` |
+| Ảnh tổng quan + quét chữ overlay | ~2–3 phút | ~3–5 phút | Tự động co giãn bước chụp gói gọn ~22 tấm ảnh |
+| Viết kịch bản `INTRO_DUB` + `BEATS` (AI) | ~8–10 phút | ~10–12 phút | 12–16 câu Intro + 112–120 beat Review (~7.000–7.600 âm tiết) |
+| Lồng tiếng `M + N` câu qua MCP (`speed=1.08`) | ~4–4,5 phút | ~4–4,5 phút | Không phụ thuộc độ dài phim gốc |
+| Render Intro + các beat + bản cuối (~25 phút) | ~3–4 phút | ~3,5–4,5 phút | Sửa lẻ chỉ mất ~15–30 giây nhờ cache `.sig` |
+| **Tổng (chạy song song tiền xử lý)** | **~20–25 phút** | **~25–30 phút** | Khuyên dùng |
