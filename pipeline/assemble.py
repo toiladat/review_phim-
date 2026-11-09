@@ -56,6 +56,7 @@ OUT = os.path.join(ROOT, "output")
 FPS_NUM, FPS_DEN = 30000, 1001
 FPS = FPS_NUM / FPS_DEN
 PAUSE = 0.14          # silence between beats (s)
+EXPORT_SPEED = 1.10   # final exported video & audio speed multiplier (1.1x)
 SEG_TARGET = 2.9      # preferred visual segment length (s)
 ORIG_VOL = 0.0        # original soundtrack muted (0.0 = pure Vietnamese narration)
 BURN_SUBS = False     # do not burn Vietnamese subtitles or title onto the video
@@ -546,8 +547,9 @@ def stage_plan(info):
         if not segs:
             raise SystemExit(f"no visuals for beat {ai['i'] + 1}: {spec}")
         used.extend((a, b) for a, b, _ in segs)
+        sp_exp = EXPORT_SPEED if EXPORT_SPEED and EXPORT_SPEED > 0 else 1.0
         plan.append({"i": ai["i"], "dur": D, "frames": nfr, "wav": ai["wav"], "audio_dur": ai["dur"],
-                     "start_sec": round(t_timeline, 3), "end_sec": round(t_timeline + D, 3),
+                     "start_sec": round(t_timeline / sp_exp, 3), "end_sec": round((t_timeline + D) / sp_exp, 3),
                      "text": text, "clauses": ai.get("clauses"), "segs": [list(s) for s in segs]})
         t_timeline += D
     if HAS_HARDSUB:
@@ -822,9 +824,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ev = []
     srt_blocks = []
     idx = 1
+    sp = EXPORT_SPEED if EXPORT_SPEED and EXPORT_SPEED > 0 else 1.0
     for sa, sb, txt in (intro_srt or []):
-        ev.append(f"Dialogue: 0,{ass_time(sa)},{ass_time(sb)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(txt)}")
-        srt_blocks.append(f"{idx}\n{srt_time(sa)} --> {srt_time(sb)}\n{txt}\n")
+        ev.append(f"Dialogue: 0,{ass_time(sa / sp)},{ass_time(sb / sp)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(txt)}")
+        srt_blocks.append(f"{idx}\n{srt_time(sa / sp)} --> {srt_time(sb / sp)}\n{txt}\n")
         idx += 1
 
     t0 = intro_offset
@@ -843,8 +846,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     tc = t
                     for c, w_ in zip(sub_chunks, weights):
                         d = cl_dur * w_ / tot_w
-                        ev.append(f"Dialogue: 0,{ass_time(tc)},{ass_time(tc + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
-                        srt_blocks.append(f"{idx}\n{srt_time(tc)} --> {srt_time(tc + d)}\n{c}\n")
+                        ev.append(f"Dialogue: 0,{ass_time(tc / sp)},{ass_time((tc + d) / sp)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
+                        srt_blocks.append(f"{idx}\n{srt_time(tc / sp)} --> {srt_time((tc + d) / sp)}\n{c}\n")
                         idx += 1
                         tc += d
                 t += cl_dur + cl_pause
@@ -855,8 +858,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             t = t0
             for c, w_ in zip(chunks, weights):
                 d = p["audio_dur"] * w_ / tot
-                ev.append(f"Dialogue: 0,{ass_time(t)},{ass_time(t + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
-                srt_blocks.append(f"{idx}\n{srt_time(t)} --> {srt_time(t + d)}\n{c}\n")
+                ev.append(f"Dialogue: 0,{ass_time(t / sp)},{ass_time((t + d) / sp)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
+                srt_blocks.append(f"{idx}\n{srt_time(t / sp)} --> {srt_time((t + d) / sp)}\n{c}\n")
                 idx += 1
                 t += d
         t0 += p["dur"]
@@ -865,7 +868,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     intro_txt = "\n".join(f"[INTRO {i + 1:02d}] {x[4]}" for i, x in enumerate(INTRO_DUB))
     beats_txt = "\n\n".join(f"[{p['i'] + 1:03d}] {p['text']}" for p in plan)
     open(script_path, "w", encoding="utf-8").write((intro_txt + "\n\n" if intro_txt else "") + beats_txt + "\n")
-    return t0
+    return t0 / sp
 
 
 # ---------------------------------------------------------------- final
@@ -907,14 +910,24 @@ def stage_final(plan, name="review_vi.mp4"):
     txt_out = os.path.join(OUT, "kich_ban_review.txt")
     total = build_ass_and_srt(plan, ass, srt_out, txt_out, intro_srt=intro_srt, intro_offset=intro_dur)
     out = os.path.join(OUT, name)
-    af = (f"[1:a]aformat=channel_layouts=stereo,volume=1.0,"
+    sp = EXPORT_SPEED if EXPORT_SPEED and EXPORT_SPEED > 0 else 1.0
+    atempo_prefix = f"atempo={sp:.4f}," if abs(sp - 1.0) > 1e-4 else ""
+    af = (f"[1:a]{atempo_prefix}aformat=channel_layouts=stereo,volume=1.0,"
           f"acompressor=threshold=-18dB:ratio=3:attack=5:release=120,"
-          f"loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=out:st={total - 1.2:.2f}:d=1.2[a]")
+          f"loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=out:st={max(0.0, total - 1.2):.2f}:d=1.2[a]")
+    hwaccel_args = [] if IS_MAC else ["-hwaccel", "cuda"]
     if BURN_SUBS:
         ass_ff = ass.replace("\\", "/").replace(":", "\\:")
         fonts_ff = "/System/Library/Fonts/Supplemental" if IS_MAC else "C\\:/Windows/Fonts"
-        vf = f"subtitles='{ass_ff}':fontsdir='{fonts_ff}'"
-        run([FF, "-y", "-hide_banner", "-loglevel", "error", "-i", joined, "-i", nar, "-vf", vf,
+        vf = f"setpts=PTS/{sp:.4f},fps={FPS_NUM}/{FPS_DEN}," if abs(sp - 1.0) > 1e-4 else ""
+        vf += f"subtitles='{ass_ff}':fontsdir='{fonts_ff}'"
+        run([FF, "-y", "-hide_banner", "-loglevel", "error", *hwaccel_args, "-i", joined, "-i", nar, "-vf", vf,
+             "-filter_complex", af, "-map", "0:v", "-map", "[a]",
+             *VCODEC_BEAT, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+             "-movflags", "+faststart", out])
+    elif abs(sp - 1.0) > 1e-4:
+        vf = f"setpts=PTS/{sp:.4f},fps={FPS_NUM}/{FPS_DEN}"
+        run([FF, "-y", "-hide_banner", "-loglevel", "error", *hwaccel_args, "-i", joined, "-i", nar, "-vf", vf,
              "-filter_complex", af, "-map", "0:v", "-map", "[a]",
              *VCODEC_BEAT, "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
              "-movflags", "+faststart", out])
@@ -924,7 +937,7 @@ def stage_final(plan, name="review_vi.mp4"):
              "-filter_complex", af, "-map", "0:v", "-map", "[a]",
              "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
              "-movflags", "+faststart", out])
-    print(f"FINAL: {out}  ({total / 60:.2f} min)")
+    print(f"FINAL: {out}  ({total / 60:.2f} min, speed={sp:.2f}x)")
     return out
 
 

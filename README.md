@@ -55,7 +55,7 @@ flowchart TD
 2. Phần thân kịch bản chia thành **112–120 beat (`BEATS`, ~7.000–7.600 âm tiết)** theo ngôi thứ ba Người Kể Chuyện, mỗi beat dài `50–65` âm tiết (`4–5` vế ngắn ngăn cách bởi `3–4` dấu phẩy) và gắn **cửa sổ thời gian nguồn** bám sát hành động (`trung vị 40–50 giây`, không quá `85–90 giây`).
 3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và **từng vế câu tách theo dấu phẩy** của `BEATS` (`split_clauses=True`, trung bình ~12–18 chữ/vế) bằng giọng chuẩn `viet_rv_v3_dt6fwnxQ` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → giọng đọc rõ chữ, nhịp thở tự nhiên và biết **chính xác thời lượng từng vế câu**.
 4. Trong cửa sổ thời gian của mỗi beat, chọn các cú máy sạch, rải đều, tổng thời lượng **khớp đúng** thời lượng giọng đọc + `PAUSE = 0.14s` mà không bị làm chậm (`slow: []`).
-5. Ghép `INTRO_DUB` + `0.55s` Freeze Frame + `BEATS`, xuất phụ đề rời `.srt` và chuẩn hóa âm lượng `-15 LUFS`.
+5. Ghép `INTRO_DUB` + `0.55s` Freeze Frame + `BEATS`, áp dụng tốc độ xuất chuẩn **`EXPORT_SPEED = 1.10` (`1.1x`)** đồng bộ cho cả hình (`setpts=PTS/1.10`), tiếng (`atempo=1.10`) và phụ đề rời `.srt`, chuẩn hóa âm lượng `-15 LUFS`.
 
 ---
 
@@ -591,6 +591,7 @@ tools\ffmpeg.exe -i output\review_vi.mp4 -af volumedetect -vn -f null -         
 | `BEATS` (script_beats) | 112–120 beat, 7.000–7.600 âm tiết | Phần thân Review Người Kể Chuyện (50–65 âm tiết/beat, 4–5 vế, 3–4 dấu phẩy) |
 | Cửa sổ thời gian `spec` | Trung vị 40–50s (28–65s, ≤ 85–90s) | Độ rộng cửa sổ hình mỗi beat; từ Beat 3 trở đi chồng lấn (`overlap`) ≤ 8–10s |
 | `PAUSE` (assemble) | 0.14 | Khoảng nghỉ giữa các beat trong `BEATS` (giây) |
+| `EXPORT_SPEED` (assemble) | 1.10 | Tốc độ xuất video, âm thanh (`atempo=1.10`) và phụ đề `.srt` ở bước `final` (`1.1x`) |
 | `seg_max` (choose) | 3.6 | Độ dài tối đa một đoạn hình (giây) |
 | `min_len` (pieces_for) | 1.0 | Bỏ mảnh cú máy ngắn hơn (giây) |
 | Tốc độ làm chậm tối thiểu | 0.62 | Khi cảnh nguồn ngắn hơn giọng đọc (mục tiêu luôn là `slow: []`) |
