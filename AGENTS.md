@@ -59,7 +59,7 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
    ```bash
    python -u tools/run_dgt_tts.py
    ```
-   - Tự động kiểm tra / khởi chạy `DgtAutoTTSMM.exe` (port `39217`) và chọn giọng chuẩn **`viet_rv_v2_dt6uCxVe`** (`voice_id: 73bbb225193b`, mẫu gốc lưu tại `tools/voice_sample_v2.mp3`).
+   - Tự động kiểm tra / khởi chạy `DgtAutoTTSMM.exe` (port `39217`) và chọn giọng chuẩn **`viet_rv_v3_dt6fwnxQ`** (`voice_id: b397be0b8022`, mẫu gốc lưu tại `tools/voice_sample_v3.mp3`).
    - Giữ nguyên tốc độ tự nhiên **`speed = 1.0`** và model **`speech-02-hd`** (`set_tts_settings(change_speed=False, speed=1.0, model="speech-02-hd")`). **TUYỆT ĐỐI KHÔNG** đẩy `speed=1.08` hay chỉnh sửa tốc độ giọng đọc.
    - Nạp `work/tts/narration.srt` (~450–500 dòng vế câu ngắn) và chạy `start_tts(allow_long_lines=True, merge_short_lines=False)` cho đến khi `done == total_lines` (tự động gọi `start_tts` bồi tiếp các lượt sau nếu có dòng chạm ngưỡng `Retry: 25` do server `API 429/503`).
 
@@ -115,7 +115,7 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
 ### 2.5. Quy tắc Âm học & Cân Bằng Nhịp Ngắt Tự Nhiên / Khóa Tốc Độ TTS
 - Mọi con số phải viết bằng chữ tiếng Việt chuẩn (*ba năm*, *tám mươi triệu tệ*, *bốn mươi phần trăm*, *hai mươi tệ một giờ*).
 - Đan cài các cụm từ 4 chữ giàu nhạc tính (*ăn cháo đá bát, được đằng chân lân đằng đầu, kim chi ngọc diệp, trở mặt nhanh hơn lật sách, trốn chui trốn lủi, đầu đường xó chợ, tiền mất tật mang*).
-- **Xử lý âm thanh trong `pipeline/assemble.py` (`stage_audio`) – TÁCH VẾ KHI GỬI TTS & GHÉP NHỊP THỞ TỰ NHIÊN 100%:** mỗi beat được tách theo dấu phẩy `,` thành các vế ngắn (`~12–18` chữ) trong `narration.srt` để TTS đọc từng hơi rõ chữ, giàu biểu cảm mà không bị hụt hơi hay nuốt chữ như khi đọc câu dài 60 từ. Khi vào `stage_audio`, từng vế `.mp3` chỉ cắt khoảng lặng thừa ở đầu/cuối bằng `silenceremove` (`-46 dB`, giữ `0.02s` đầu / `0.04s` cuối), sau đó nối các vế trong cùng 1 beat với nhịp lấy hơi dấu phẩy tự nhiên `0.08s` (`clause_pause_samples`) tạo thành `work/aud/{i+1:03d}.wav`, và giữa các beat cách nhau `PAUSE = 0.14s`. **CẤM** đổi tốc độ từng beat (`atempo`), **CẤM** cắt/ghép/nén bên trong vế câu. Nhịp đọc do chính giọng TTS chuẩn `viet_rv_v2_dt6uCxVe` (`speed=1.0`, `speech-02-hd`) quyết định, và thời lượng đoạn hình lẫn phụ đề `review_vi.srt` của mỗi beat/vế câu được tự động tính khớp 100% theo thời lượng file voice thực tế.
+- **Xử lý âm thanh trong `pipeline/assemble.py` (`stage_audio`) – TÁCH VẾ KHI GỬI TTS & GHÉP NHỊP THỞ TỰ NHIÊN 100%:** mỗi beat được tách theo dấu phẩy `,` thành các vế ngắn (`~12–18` chữ) trong `narration.srt` để TTS đọc từng hơi rõ chữ, giàu biểu cảm mà không bị hụt hơi hay nuốt chữ như khi đọc câu dài 60 từ. Khi vào `stage_audio`, từng vế `.mp3` chỉ cắt khoảng lặng thừa ở đầu/cuối bằng `silenceremove` (`-46 dB`, giữ `0.02s` đầu / `0.04s` cuối), sau đó nối các vế trong cùng 1 beat với nhịp lấy hơi dấu phẩy tự nhiên `0.08s` (`clause_pause_samples`) tạo thành `work/aud/{i+1:03d}.wav`, và giữa các beat cách nhau `PAUSE = 0.14s`. **CẤM** đổi tốc độ từng beat (`atempo`), **CẤM** cắt/ghép/nén bên trong vế câu. Nhịp đọc do chính giọng TTS chuẩn `viet_rv_v3_dt6fwnxQ` (`speed=1.0`, `speech-02-hd`) quyết định, và thời lượng đoạn hình lẫn phụ đề `review_vi.srt` của mỗi beat/vế câu được tự động tính khớp 100% theo thời lượng file voice thực tế.
 
 ### 2.6. Quy tắc Chọn Cửa Sổ Thời Gian (`spec`) Bám Sát Cảnh 100% & Không Bị Làm Chậm (`slow: []`)
 - **Độ rộng cửa sổ chặt (Chuẩn Tập 15):**

@@ -2,7 +2,7 @@
 """
 Automated DGT Auto TTS runner via local MCP server (http://localhost:39217/mcp).
 - Automatically launches DgtAutoTTSMM.exe and logs in if port 39217 is not active.
-- Ensures the locked-in voice sample (tools/voice_sample_v2.mp3) is cloned & selected.
+- Ensures the locked-in voice sample (tools/voice_sample_v3.mp3) is cloned & selected.
 - Enforces model="speech-02-hd", speed=1.0, change_speed=False.
 - Loads work/tts/narration.srt and runs start_tts until all lines are 100% downloaded,
   automatically resuming if any lines hit Retry: 25 due to server 429/503.
@@ -20,7 +20,7 @@ URL = "http://localhost:39217/mcp"
 DGT_DIR = r"C:\Users\Admin\Downloads\DgtAutoTTSMM_v5\DgtAutoTTSMM_v5"
 DGT_EXE = os.path.join(DGT_DIR, "DgtAutoTTSMM.exe")
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VOICE_SAMPLE = os.path.join(ROOT_DIR, "tools", "voice_sample_v2.mp3")
+VOICE_SAMPLE = os.path.join(ROOT_DIR, "tools", "voice_sample_v3.mp3")
 DEFAULT_SRT = os.path.join(ROOT_DIR, "work", "tts", "narration.srt")
 
 sid = None
@@ -140,7 +140,7 @@ def main():
     if isinstance(voices, list):
         for v in voices:
             vname = v.get("voice_name", "")
-            if vname.startswith("viet_rv_v2"):
+            if vname.startswith("viet_rv_v3"):
                 target_voice = vname
                 break
 
@@ -149,7 +149,7 @@ def main():
         res = mcp_tool(
             "clone_voice",
             {
-                "voice_name": "viet_rv_v2",
+                "voice_name": "viet_rv_v3",
                 "language": "Vietnamese",
                 "sample_path": VOICE_SAMPLE,
                 "agree_terms": True,
@@ -158,7 +158,7 @@ def main():
             timeout=120,
         )
         print("[DGT] clone_voice:", json.dumps(res, ensure_ascii=False))
-        target_voice = res.get("voice_name") if isinstance(res, dict) else "viet_rv_v2"
+        target_voice = res.get("voice_name") if isinstance(res, dict) else "viet_rv_v3"
     else:
         res = mcp_tool("select_voice", {"voice_name": target_voice})
         print("[DGT] select_voice:", json.dumps(res, ensure_ascii=False))

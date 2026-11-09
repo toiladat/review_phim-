@@ -41,7 +41,7 @@ flowchart TD
     C --> H["Bước 6: AI đọc thoại + xem ảnh → viết INTRO_DUB (30s) + BEATS (112–120 beat) trong script_beats.py"]
     D --> H
     G --> H
-    H --> I["Bước 7: assemble.py make_srt → Lồng tiếng qua MCP dgt-auto-tts (giọng viet_rv_v2_dt6uCxVe, speed=1.0)"]
+    H --> I["Bước 7: assemble.py make_srt → Lồng tiếng qua MCP dgt-auto-tts (giọng viet_rv_v3_dt6fwnxQ, speed=1.0)"]
     E --> J["Bước 8: Lọc cảnh có chữ overlay (overlay_text.py)"]
     I --> K["Bước 9: assemble.py audio → plan → beats → final"]
     J --> K
@@ -53,7 +53,7 @@ flowchart TD
 Ý tưởng cốt lõi: **Mở màn 30s Thoại gốc Cao trào (Cold Open Dubbing, không spoil kết cục) + Review Người Kể Chuyện (Audio-first)**.
 1. Mở đầu bằng **~28–35 giây (`INTRO_DUB`)** cắt trực tiếp phân cảnh cay nghiệt/kịch tính nhất phim (gồm `12–16` câu thoại ngắn `4–15` âm tiết, mỗi câu là 1 file voice riêng biệt kèm khoảng nghỉ tự nhiên `post_pause_sec` `0.20–0.60s`), dừng ngay ở đỉnh điểm Cliffhanger + `0.55s` Freeze Frame chuyển cảnh.
 2. Phần thân kịch bản chia thành **112–120 beat (`BEATS`, ~7.000–7.600 âm tiết)** theo ngôi thứ ba Người Kể Chuyện, mỗi beat dài `50–65` âm tiết (`4–5` vế ngắn ngăn cách bởi `3–4` dấu phẩy) và gắn **cửa sổ thời gian nguồn** bám sát hành động (`trung vị 40–50 giây`, không quá `85–90 giây`).
-3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và **từng vế câu tách theo dấu phẩy** của `BEATS` (`split_clauses=True`, trung bình ~12–18 chữ/vế) bằng giọng chuẩn `viet_rv_v2_dt6uCxVe` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → giọng đọc rõ chữ, nhịp thở tự nhiên và biết **chính xác thời lượng từng vế câu**.
+3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và **từng vế câu tách theo dấu phẩy** của `BEATS` (`split_clauses=True`, trung bình ~12–18 chữ/vế) bằng giọng chuẩn `viet_rv_v3_dt6fwnxQ` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → giọng đọc rõ chữ, nhịp thở tự nhiên và biết **chính xác thời lượng từng vế câu**.
 4. Trong cửa sổ thời gian của mỗi beat, chọn các cú máy sạch, rải đều, tổng thời lượng **khớp đúng** thời lượng giọng đọc + `PAUSE = 0.14s` mà không bị làm chậm (`slow: []`).
 5. Ghép `INTRO_DUB` + `0.55s` Freeze Frame + `BEATS`, xuất phụ đề rời `.srt` và chuẩn hóa âm lượng `-15 LUFS`.
 
@@ -120,7 +120,7 @@ review_tool/
 | `scenedetect` 0.7 | Tách cú máy đa luồng (`shots.py`) | |
 | `opencv-python`, `numpy`, `Pillow` | Đọc khung hình, ảnh lưới, phát hiện chữ, tạo mặt nạ | |
 | `ffmpeg` / `imageio-ffmpeg` | Cắt ghép video/audio và xử lý filter | Tự động dò `tools/ffmpeg.exe` -> `imageio_ffmpeg` -> `ffmpeg` trong PATH hệ thống |
-| App **DgtAutoTTSMM** + MCP `dgt-auto-tts` | Lồng tiếng Việt (MiniMax, giọng clone) | Giọng chuẩn `viet_rv_v2_dt6uCxVe` (`tools/voice_sample_v2.mp3`), model `speech-02-hd`, `speed = 1.0` |
+| App **DgtAutoTTSMM** + MCP `dgt-auto-tts` | Lồng tiếng Việt (MiniMax, giọng clone) | Giọng chuẩn `viet_rv_v3_dt6fwnxQ` (`tools/voice_sample_v3.mp3`), model `speech-02-hd`, `speed = 1.0` |
 
 Cài thư viện Python:
 
@@ -294,7 +294,7 @@ Luồng gọi MCP:
 
 ```
 get_status            → kiểm tra đăng nhập, giọng đang chọn
-list_voices / select_voice → giọng chuẩn "viet_rv_v2_dt6uCxVe" (nếu máy mới chưa có thì clone từ tools/voice_sample_v2.mp3)
+list_voices / select_voice → giọng chuẩn "viet_rv_v3_dt6fwnxQ" (nếu máy mới chưa có thì clone từ tools/voice_sample_v3.mp3)
 set_tts_settings      → change_speed=false, speed=1.0, model="speech-02-hd" (giữ nguyên tốc độ tự nhiên 1.0)
 load_input            → work/tts/narration.srt   (gồm M câu ngắn INTRO_DUB + N câu BEATS)
 start_tts             → allow_long_lines=true, merge_short_lines=false
@@ -605,7 +605,7 @@ tools\ffmpeg.exe -i output\review_vi.mp4 -af volumedetect -vn -f null -         
 | Phụ đề rời / ASS | Roboto Bold 64 (dọc) / 48 (ngang) | ≤ 58 ký tự/cụm, ≤ 30 ký tự/dòng (dọc) hoặc ≤ 82 ký tự/cụm, ≤ 44 ký tự/dòng (ngang) |
 | Mã hóa phần cứng | `h264_nvenc` (Win) / `h264_videotoolbox` (Mac) | Tự động chọn theo hệ điều hành, AAC 192k, 48 kHz |
 | Chuẩn âm lượng | loudnorm I = −15, TP = −1.5 | |
-| TTS | `viet_rv_v2_dt6uCxVe` (`tools/voice_sample_v2.mp3`), `speech-02-hd`, `speed = 1.0` | Giữ nguyên tốc độ tự nhiên `1.0`, không can thiệp `atempo` |
+| TTS | `viet_rv_v3_dt6fwnxQ` (`tools/voice_sample_v3.mp3`), `speech-02-hd`, `speed = 1.0` | Giữ nguyên tốc độ tự nhiên `1.0`, không can thiệp `atempo` |
 
 ---
 
