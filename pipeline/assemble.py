@@ -126,15 +126,37 @@ def wav_dur(p):
         return w.getnframes() / w.getframerate()
 
 
-def stage_make_srt():
-    """Export INTRO_DUB (short voice lines) + BEATS (review beats) to work/tts/narration.srt."""
+def _split_beat_clauses(txt):
+    """Split a beat sentence by comma into natural breath clauses, preserving trailing punctuation."""
+    parts = [p.strip() for p in txt.split(",") if p.strip()]
+    return [p + ("," if k < len(parts) - 1 else "") for k, p in enumerate(parts)]
+
+
+def stage_make_srt(split_clauses=True):
+    """Export INTRO_DUB (short voice lines) + BEATS (split by comma into clauses) to work/tts/narration.srt."""
     os.makedirs(os.path.join(WORK, "tts"), exist_ok=True)
     srt_p = os.path.join(WORK, "tts", "narration.srt")
-    all_texts = [x[4] for x in INTRO_DUB] + [t for _, t in BEATS]
+    map_p = os.path.join(WORK, "tts", "beat_clause_map.json")
+    intro_texts = [x[4] for x in INTRO_DUB]
+    all_texts = list(intro_texts)
+    beat_map = []
+    if split_clauses:
+        for bi, (_, bt) in enumerate(BEATS):
+            clauses = _split_beat_clauses(bt)
+            indices = []
+            for cl in clauses:
+                all_texts.append(cl)
+                indices.append(len(all_texts))  # 1-based SRT index
+            beat_map.append({"beat_idx": bi, "srt_indices": indices, "clauses": clauses})
+        json.dump(beat_map, open(map_p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    else:
+        if os.path.exists(map_p):
+            os.remove(map_p)
+        all_texts.extend(t for _, t in BEATS)
     fmt = lambda s: f"{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d},000"
     blocks = [f"{i + 1}\n{fmt(i * 30)} --> {fmt(i * 30 + 25)}\n{txt}\n" for i, txt in enumerate(all_texts)]
     open(srt_p, "w", encoding="utf-8").write("\n".join(blocks))
-    print(f"make_srt: {len(INTRO_DUB)} intro lines + {len(BEATS)} beats = {len(all_texts)} total lines -> {srt_p}")
+    print(f"make_srt (split_clauses={split_clauses}): {len(INTRO_DUB)} intro lines + {len(all_texts) - len(INTRO_DUB)} beat lines = {len(all_texts)} total lines -> {srt_p}")
     return srt_p
 
 
@@ -157,17 +179,53 @@ def stage_audio():
             intro_info.append({"idx": idx, "wav": dst, "dur": round(wav_dur(dst), 3)})
         json.dump(intro_info, open(os.path.join(WORK, "intro_audio.json"), "w"), indent=1)
 
+    map_p = os.path.join(WORK, "tts", "beat_clause_map.json")
     info = []
-    for i in range(len(BEATS)):
-        src = os.path.join(TTS_DIR, f"{m_intro + i + 1}.mp3")
-        dst = os.path.join(AUD, f"{i + 1:03d}.wav")
-        if not os.path.exists(src):
-            raise SystemExit(f"missing TTS {src}")
-        if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
-            af = ("silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.03,"
-                  "areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.06,areverse")
-            run([FF, "-y", "-i", src, "-af", af, "-ar", "48000", "-ac", "1", dst])
-        info.append({"i": i, "wav": dst, "dur": round(wav_dur(dst), 3)})
+    if os.path.exists(map_p):
+        beat_map = json.load(open(map_p, encoding="utf-8"))
+        clause_pause_samples = round(0.08 * 48000)
+        af_cl = ("silenceremove=start_periods=1:start_threshold=-46dB:start_silence=0.02,"
+                 "areverse,silenceremove=start_periods=1:start_threshold=-46dB:start_silence=0.04,areverse")
+        for item in beat_map:
+            i = item["beat_idx"]
+            dst = os.path.join(AUD, f"{i + 1:03d}.wav")
+            pcm_parts = []
+            clauses_meta = []
+            clauses_txt = item.get("clauses", [])
+            for k, s_idx in enumerate(item["srt_indices"]):
+                src = os.path.join(TTS_DIR, f"{s_idx}.mp3")
+                if not os.path.exists(src):
+                    raise SystemExit(f"missing clause TTS {src}")
+                c_wav = os.path.join(AUD, f"cl_{s_idx:04d}.wav")
+                if not os.path.exists(c_wav) or os.path.getmtime(c_wav) < os.path.getmtime(src):
+                    run([FF, "-y", "-i", src, "-af", af_cl, "-ar", "48000", "-ac", "1", c_wav])
+                with wave.open(c_wav, "rb") as wi:
+                    c_pcm = wi.readframes(wi.getnframes())
+                pcm_parts.append(c_pcm)
+                c_dur = len(c_pcm) / (2.0 * 48000.0)
+                c_pause = (clause_pause_samples / 48000.0) if k < len(item["srt_indices"]) - 1 else 0.0
+                if k < len(item["srt_indices"]) - 1:
+                    pcm_parts.append(b"\x00\x00" * clause_pause_samples)
+                clauses_meta.append({
+                    "txt": clauses_txt[k] if k < len(clauses_txt) else "",
+                    "dur": round(c_dur, 4),
+                    "pause": round(c_pause, 4),
+                })
+            with wave.open(dst, "wb") as wo:
+                wo.setnchannels(1); wo.setsampwidth(2); wo.setframerate(48000)
+                wo.writeframes(b"".join(pcm_parts))
+            info.append({"i": i, "wav": dst, "dur": round(wav_dur(dst), 3), "clauses": clauses_meta})
+    else:
+        for i in range(len(BEATS)):
+            src = os.path.join(TTS_DIR, f"{m_intro + i + 1}.mp3")
+            dst = os.path.join(AUD, f"{i + 1:03d}.wav")
+            if not os.path.exists(src):
+                raise SystemExit(f"missing TTS {src}")
+            if not os.path.exists(dst) or os.path.getmtime(dst) < os.path.getmtime(src):
+                af = ("silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.03,"
+                      "areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.06,areverse")
+                run([FF, "-y", "-i", src, "-af", af, "-ar", "48000", "-ac", "1", dst])
+            info.append({"i": i, "wav": dst, "dur": round(wav_dur(dst), 3)})
     json.dump(info, open(os.path.join(WORK, "beats_audio.json"), "w"), indent=1)
     tot = sum(x["dur"] for x in info) + PAUSE * len(info)
     print(f"audio: {m_intro} intro lines + {len(info)} beats, review {tot / 60:.2f} min")
@@ -490,7 +548,7 @@ def stage_plan(info):
         used.extend((a, b) for a, b, _ in segs)
         plan.append({"i": ai["i"], "dur": D, "frames": nfr, "wav": ai["wav"], "audio_dur": ai["dur"],
                      "start_sec": round(t_timeline, 3), "end_sec": round(t_timeline + D, 3),
-                     "text": text, "segs": [list(s) for s in segs]})
+                     "text": text, "clauses": ai.get("clauses"), "segs": [list(s) for s in segs]})
         t_timeline += D
     if HAS_HARDSUB:
         print("detecting tight 2D subtitle boxes per segment...", flush=True)
@@ -771,16 +829,36 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     t0 = intro_offset
     for p in plan:
-        chunks = split_chunks(p["text"])
-        weights = [max(len(c.split()), 1) + 0.6 * len(re.findall(r"[,.:;?!]", c)) for c in chunks]
-        tot = sum(weights)
-        t = t0
-        for c, w_ in zip(chunks, weights):
-            d = p["audio_dur"] * w_ / tot
-            ev.append(f"Dialogue: 0,{ass_time(t)},{ass_time(t + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
-            srt_blocks.append(f"{idx}\n{srt_time(t)} --> {srt_time(t + d)}\n{c}\n")
-            idx += 1
-            t += d
+        clauses_meta = p.get("clauses")
+        if clauses_meta:
+            t = t0
+            for cm in clauses_meta:
+                cl_txt = cm.get("txt", "").strip()
+                cl_dur = float(cm.get("dur", 0.0))
+                cl_pause = float(cm.get("pause", 0.0))
+                if cl_txt and cl_dur > 0:
+                    sub_chunks = split_chunks(cl_txt)
+                    weights = [max(len(c.split()), 1) for c in sub_chunks]
+                    tot_w = sum(weights)
+                    tc = t
+                    for c, w_ in zip(sub_chunks, weights):
+                        d = cl_dur * w_ / tot_w
+                        ev.append(f"Dialogue: 0,{ass_time(tc)},{ass_time(tc + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
+                        srt_blocks.append(f"{idx}\n{srt_time(tc)} --> {srt_time(tc + d)}\n{c}\n")
+                        idx += 1
+                        tc += d
+                t += cl_dur + cl_pause
+        else:
+            chunks = split_chunks(p["text"])
+            weights = [max(len(c.split()), 1) + 0.6 * len(re.findall(r"[,.:;?!]", c)) for c in chunks]
+            tot = sum(weights)
+            t = t0
+            for c, w_ in zip(chunks, weights):
+                d = p["audio_dur"] * w_ / tot
+                ev.append(f"Dialogue: 0,{ass_time(t)},{ass_time(t + d)},Sub,,0,0,0,,{{\\an5\\pos({W // 2},{BAND_Y + BAND_H // 2})}}{wrap2(c)}")
+                srt_blocks.append(f"{idx}\n{srt_time(t)} --> {srt_time(t + d)}\n{c}\n")
+                idx += 1
+                t += d
         t0 += p["dur"]
     open(ass_path, "w", encoding="utf-8-sig").write(head + "\n".join(ev) + "\n")
     open(srt_path, "w", encoding="utf-8").write("\n".join(srt_blocks))

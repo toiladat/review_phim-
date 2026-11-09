@@ -53,7 +53,7 @@ flowchart TD
 Ý tưởng cốt lõi: **Mở màn 30s Thoại gốc Cao trào (Cold Open Dubbing, không spoil kết cục) + Review Người Kể Chuyện (Audio-first)**.
 1. Mở đầu bằng **~28–35 giây (`INTRO_DUB`)** cắt trực tiếp phân cảnh cay nghiệt/kịch tính nhất phim (gồm `12–16` câu thoại ngắn `4–15` âm tiết, mỗi câu là 1 file voice riêng biệt kèm khoảng nghỉ tự nhiên `post_pause_sec` `0.20–0.60s`), dừng ngay ở đỉnh điểm Cliffhanger + `0.55s` Freeze Frame chuyển cảnh.
 2. Phần thân kịch bản chia thành **112–120 beat (`BEATS`, ~7.000–7.600 âm tiết)** theo ngôi thứ ba Người Kể Chuyện, mỗi beat dài `50–65` âm tiết (`4–5` vế ngắn ngăn cách bởi `3–4` dấu phẩy) và gắn **cửa sổ thời gian nguồn** bám sát hành động (`trung vị 40–50 giây`, không quá `85–90 giây`).
-3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và từng beat của `BEATS` bằng giọng chuẩn `viet_rv_v2_dt6uCxVe` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → biết **chính xác thời lượng từng câu**.
+3. Lồng tiếng từng câu ngắn của `INTRO_DUB` và **từng vế câu tách theo dấu phẩy** của `BEATS` (`split_clauses=True`, trung bình ~12–18 chữ/vế) bằng giọng chuẩn `viet_rv_v2_dt6uCxVe` ở tốc độ tự nhiên `speed = 1.0` (`speech-02-hd`) → giọng đọc rõ chữ, nhịp thở tự nhiên và biết **chính xác thời lượng từng vế câu**.
 4. Trong cửa sổ thời gian của mỗi beat, chọn các cú máy sạch, rải đều, tổng thời lượng **khớp đúng** thời lượng giọng đọc + `PAUSE = 0.14s` mà không bị làm chậm (`slow: []`).
 5. Ghép `INTRO_DUB` + `0.55s` Freeze Frame + `BEATS`, xuất phụ đề rời `.srt` và chuẩn hóa âm lượng `-15 LUFS`.
 
@@ -328,8 +328,8 @@ python -u pipeline/assemble.py beats final        # render các beat + ghép vid
 
 | Giai đoạn | Làm gì | Đầu ra |
 |---|---|---|
-| `make_srt` | Xuất toàn bộ `INTRO_DUB` (`1..M`) nối tiếp `BEATS` (`M+1..M+N`) ra file SRT chuẩn để nạp vào MCP TTS | `work/tts/narration.srt` |
-| `audio` | Đọc `1.mp3 … (M+N).mp3`, **chỉ cắt khoảng lặng đầu/cuối bằng `silenceremove` (`-48 dB`)**, chuyển sang wav 48 kHz mono (**CẤM** nén khoảng nghỉ bên trong câu, **CẤM** đổi tốc độ `atempo` từng beat) | `work/aud/intro_NNN.wav`, `work/aud/NNN.wav`, `intro_audio.json`, `beats_audio.json` |
+| `make_srt` | Xuất toàn bộ `INTRO_DUB` (`1..M`) nối tiếp **các vế câu tách theo dấu phẩy** của `BEATS` (`M+1..M+K`, `split_clauses=True`, ~450–500 dòng) ra file SRT chuẩn kèm bảng ánh xạ `beat_clause_map.json` để nạp vào MCP TTS | `work/tts/narration.srt`, `work/tts/beat_clause_map.json` |
+| `audio` | Đọc từng file `.mp3`, **chỉ cắt khoảng lặng đầu/cuối bằng `silenceremove` (`-46 dB`)**, nối các vế trong cùng 1 beat với nhịp nghỉ dấu phẩy `0.08s` thành `work/aud/NNN.wav` 48 kHz mono (**CẤM** nén khoảng nghỉ bên trong vế, **CẤM** đổi tốc độ `atempo` từng beat) | `work/aud/intro_NNN.wav`, `work/aud/NNN.wav`, `intro_audio.json`, `beats_audio.json` |
 | `plan` | Với mỗi beat: thời lượng = giọng đọc + **0,14 giây nghỉ (`PAUSE = 0.14`)**, làm tròn theo số khung hình; tính `intro_dur` lưu vào `work/intro_meta.json`, ghi `start_sec`/`end_sec` và chọn các đoạn hình trong cửa sổ nguồn | `work/plan.json`, `work/intro_meta.json` |
 | `beats` | Render mỗi beat thành 1 file mp4 (3 luồng song song, mã hóa phần cứng `h264_nvenc` trên Windows hoặc `h264_videotoolbox` trên macOS): cắt các đoạn, phóng 1,05×, tùy chọn làm mờ hộp phụ đề Trung 2D (`BLUR_SUBS`), tắt tiếng gốc (`ORIG_VOL = 0.0`, `-an`), khóa đúng số khung hình | `work/beats/NNN.mp4` + `.sig` |
 | `final` | Render `INTRO_DUB` (~30s + `0.55s` Freeze Frame chuyển cảnh) → ghép với toàn bộ các beat (`concat`) → dựng track âm thanh khớp từng mẫu (giữ `sfx_lead_sec` + `post_pause_sec` ở Intro và `PAUSE = 0.14s` ở Review) → xuất phụ đề rời `.srt` (mặc định `BURN_SUBS = False`) + chuẩn hóa âm lượng `-15 LUFS` | `output/review_vi.mp4`, `output/review_vi.srt`, `output/kich_ban_review.txt` |

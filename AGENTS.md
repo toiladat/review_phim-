@@ -49,17 +49,19 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
   ```
   *(Kết quả `bad_intro` và `bad_beats` bắt buộc phải là `[]`)*.
 
-### Bước 4: Lồng tiếng qua MCP `dgt-auto-tts` (Giọng chuẩn `viet_rv_v2_dt6uCxVe`, `speed=1.0`)
+### Bước 4: Lồng tiếng Tách Vế Câu qua MCP `dgt-auto-tts` (Giọng chuẩn `viet_rv_v2_dt6uCxVe`, `speed=1.0`, `split_clauses=True`)
 1. Xóa sạch cache âm thanh cũ (`work/tts/narration/*.mp3` và `work/aud/*.wav`).
-2. Xuất toàn bộ các câu ngắn của `INTRO_DUB` (`1 .. M`) nối tiếp với `BEATS` (`M+1 .. M+N`) ra file `work/tts/narration.srt` (mỗi câu thoại ngắn trong `INTRO_DUB` và mỗi beat trong `BEATS` là **1 entry SRT riêng biệt** để app tạo file voice mới cho từng câu, **tuyệt đối không nạp file `.txt`**):
+2. Xuất toàn bộ các câu ngắn của `INTRO_DUB` (`1 .. M`) nối tiếp với **các vế câu đã tách theo dấu phẩy `,`** của `BEATS` (`M+1 .. M+K`, trung bình ~12–18 chữ/vế, giữ nguyên dấu `,` hoặc `.` ở cuối vế) ra file `work/tts/narration.srt` kèm bảng ánh xạ `work/tts/beat_clause_map.json` (**tuyệt đối không gộp cả beat dài 60 chữ thành 1 dòng SRT gửi TTS**, và **tuyệt đối không nạp file `.txt`**):
    ```bash
    python pipeline/assemble.py make_srt
    ```
-3. Gọi MCP `dgt-auto-tts`:
-   - `get_status` / `list_voices` -> kiểm tra và chọn giọng chuẩn **`viet_rv_v2_dt6uCxVe`** (`voice_id: 73bbb225193b`). Nếu sang máy mới chưa có giọng này trong danh sách, gọi `clone_voice(voice_name="viet_rv_v2", language="Vietnamese", sample_path="<đường_dẫn_tuyệt_đối>/tools/voice_sample_v2.mp3", agree_terms=True, select=True)`.
+3. Chạy lồng tiếng tự động qua `tools/run_dgt_tts.py` (hoặc gọi MCP `dgt-auto-tts`):
+   ```bash
+   python -u tools/run_dgt_tts.py
+   ```
+   - Tự động kiểm tra / khởi chạy `DgtAutoTTSMM.exe` (port `39217`) và chọn giọng chuẩn **`viet_rv_v2_dt6uCxVe`** (`voice_id: 73bbb225193b`, mẫu gốc lưu tại `tools/voice_sample_v2.mp3`).
    - Giữ nguyên tốc độ tự nhiên **`speed = 1.0`** và model **`speech-02-hd`** (`set_tts_settings(change_speed=False, speed=1.0, model="speech-02-hd")`). **TUYỆT ĐỐI KHÔNG** đẩy `speed=1.08` hay chỉnh sửa tốc độ giọng đọc.
-   - `load_input(file_path="<đường_dẫn_tuyệt_đối>/work/tts/narration.srt")` -> kiểm tra `total_lines == len(INTRO_DUB) + len(BEATS)` và `short_lines == []`.
-   - `start_tts(allow_long_lines=True, merge_short_lines=False)` -> chờ `done == total_lines` (nếu có dòng dừng ở `Retry: 25` do server full luồng `API 429/503`, gọi `start_tts` bồi tiếp cho đến khi đủ 100% các câu).
+   - Nạp `work/tts/narration.srt` (~450–500 dòng vế câu ngắn) và chạy `start_tts(allow_long_lines=True, merge_short_lines=False)` cho đến khi `done == total_lines` (tự động gọi `start_tts` bồi tiếp các lượt sau nếu có dòng chạm ngưỡng `Retry: 25` do server `API 429/503`).
 
 ### Bước 5: Dựng video, Kiểm tra QA & Xuất Bộ SEO
 1. Chạy `python -u pipeline/assemble.py audio plan` -> kiểm tra `beats with slow-motion fill: []` (nếu có beat bị làm chậm, mở rộng cửa sổ thời gian nguồn của beat đó trong `script_beats.py` rồi chạy lại `plan`). Bước `plan` tự động lưu `work/intro_meta.json` (`intro_dur`) và mốc `start_sec` / `end_sec` của từng beat trong `work/plan.json`.
@@ -113,7 +115,7 @@ Khi người dùng yêu cầu xử lý / làm video review cho một tập phim 
 ### 2.5. Quy tắc Âm học & Cân Bằng Nhịp Ngắt Tự Nhiên / Khóa Tốc Độ TTS
 - Mọi con số phải viết bằng chữ tiếng Việt chuẩn (*ba năm*, *tám mươi triệu tệ*, *bốn mươi phần trăm*, *hai mươi tệ một giờ*).
 - Đan cài các cụm từ 4 chữ giàu nhạc tính (*ăn cháo đá bát, được đằng chân lân đằng đầu, kim chi ngọc diệp, trở mặt nhanh hơn lật sách, trốn chui trốn lủi, đầu đường xó chợ, tiền mất tật mang*).
-- **Xử lý âm thanh trong `pipeline/assemble.py` (`stage_audio`) – GIỮ NGUYÊN BẢN TỰ NHIÊN 100%:** chỉ cắt khoảng lặng đầu/cuối mỗi file TTS bằng `silenceremove` (`-48 dB`), ghép các câu ngắn trong `INTRO_DUB` theo đúng khoảng nghỉ tự nhiên `post_pause_sec` (`0.20s – 0.60s`), và ghép các beat trong `BEATS` cách nhau `PAUSE = 0.14s`. **CẤM** đổi tốc độ từng beat (`atempo`), **CẤM** cắt/ghép/nén khoảng nghỉ bên trong câu. Nhịp đọc do chính giọng TTS chuẩn `viet_rv_v2_dt6uCxVe` (`speed=1.0`, `speech-02-hd`) quyết định, và thời lượng đoạn hình của mỗi beat được tự động tính khớp 100% theo thời lượng file voice của beat đó.
+- **Xử lý âm thanh trong `pipeline/assemble.py` (`stage_audio`) – TÁCH VẾ KHI GỬI TTS & GHÉP NHỊP THỞ TỰ NHIÊN 100%:** mỗi beat được tách theo dấu phẩy `,` thành các vế ngắn (`~12–18` chữ) trong `narration.srt` để TTS đọc từng hơi rõ chữ, giàu biểu cảm mà không bị hụt hơi hay nuốt chữ như khi đọc câu dài 60 từ. Khi vào `stage_audio`, từng vế `.mp3` chỉ cắt khoảng lặng thừa ở đầu/cuối bằng `silenceremove` (`-46 dB`, giữ `0.02s` đầu / `0.04s` cuối), sau đó nối các vế trong cùng 1 beat với nhịp lấy hơi dấu phẩy tự nhiên `0.08s` (`clause_pause_samples`) tạo thành `work/aud/{i+1:03d}.wav`, và giữa các beat cách nhau `PAUSE = 0.14s`. **CẤM** đổi tốc độ từng beat (`atempo`), **CẤM** cắt/ghép/nén bên trong vế câu. Nhịp đọc do chính giọng TTS chuẩn `viet_rv_v2_dt6uCxVe` (`speed=1.0`, `speech-02-hd`) quyết định, và thời lượng đoạn hình lẫn phụ đề `review_vi.srt` của mỗi beat/vế câu được tự động tính khớp 100% theo thời lượng file voice thực tế.
 
 ### 2.6. Quy tắc Chọn Cửa Sổ Thời Gian (`spec`) Bám Sát Cảnh 100% & Không Bị Làm Chậm (`slow: []`)
 - **Độ rộng cửa sổ chặt (Chuẩn Tập 15):**
